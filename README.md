@@ -15,12 +15,13 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 - **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, Ready for Review, and Done columns
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
 - **Teams** — assign tickets to teams
-- **Tickets** — priority levels, due dates, labels, subtasks, dependencies (blocked by)
-- **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI
+- **Tickets** — priority levels, due dates, tags (labels) for grouping into sections such as waves or plan stages, subtasks, dependencies (blocked by)
+- **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI (macOS and Linux only)
 - **CLI** — manage everything from the terminal
-- **MCP Server** — 22 tools for AI-native project management via Model Context Protocol
+- **MCP Server** — 25 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
-- **Single Binary** — one `brew install` and you're running
+- **Single Binary** — `brew install` on macOS/Linux, or build one `taskboard.exe` on Windows
+- **Cross-platform** — macOS, Linux, and Windows
 
 ## Install
 
@@ -40,6 +41,30 @@ make build
 ```
 
 Requires Go 1.24+ and Node.js 22+.
+
+### Windows
+
+Homebrew is not available. Build from source in PowerShell (or use `make build` from Git Bash/MSYS2 if you have `make`):
+
+```powershell
+git clone https://github.com/tcarac/taskboard.git
+cd taskboard
+
+# frontend
+cd web
+npm install
+npm run build
+cd ..
+
+# embed the frontend into the binary
+New-Item -ItemType Directory -Force cmd	askboard\web\dist | Out-Null
+Copy-Item -Recurse -Force web\dist\* cmd	askboard\web\dist
+# backend
+go build -o taskboard.exe .\cmd	askboard
+.	askboard.exe start
+```
+
+On Windows the web UI, CLI, MCP server, and `start`/`stop` work. The embedded terminal does not (it needs a Unix pseudo-terminal).
 
 ## Usage
 
@@ -104,7 +129,7 @@ Project → Ticket → Subtask
 - **Tickets** are concrete, actionable tasks within a project. Don't create "epic" tickets — use projects.
 - **Subtasks** are checklist steps within a ticket, for breaking work into verifiable pieces.
 
-#### Available MCP Tools (22)
+#### Available MCP Tools (25)
 
 | Tool                    | Description                                      |
 | ----------------------- | ------------------------------------------------ |
@@ -127,8 +152,13 @@ Project → Ticket → Subtask
 | `update_ticket`         | Update ticket properties                         |
 | `move_ticket`           | Move ticket to different status column           |
 | `delete_ticket`         | Delete a ticket                                  |
+| **Labels (tags)**       |                                                  |
+| `list_labels`           | List all tags                                    |
+| `create_label`          | Create a tag (returns the existing one if the name exists) |
+| `add_label`             | Attach a tag to a ticket by name or ID (created if missing) |
+| `remove_label`          | Detach a tag from a ticket                       |
 | **Board**               |                                                  |
-| `get_board`             | Get full Kanban board grouped by status          |
+| `get_board`             | Get full Kanban board grouped by status (optionally filtered by tag) |
 | **Subtasks**            |                                                  |
 | `create_subtask`        | Add a subtask to a ticket                        |
 | `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
@@ -165,7 +195,7 @@ Here's what that looks like — a project and tickets created entirely by an AI 
 
 ### Embedded Terminal
 
-The web UI includes a built-in terminal. Click **Terminal** in the sidebar to open a full PTY shell with color support and a resizable panel. Run `opencode`, `claude`, or any command directly from the browser.
+The web UI includes a built-in terminal (macOS and Linux only; not available on Windows). Click **Terminal** in the sidebar to open a full PTY shell with color support and a resizable panel. Run `opencode`, `claude`, or any command directly from the browser.
 
 ![Embedded Terminal](screenshots/terminal.png)
 
@@ -177,6 +207,7 @@ All data is stored in a SQLite database at:
 
 - **macOS**: `~/Library/Application Support/taskboard/taskboard.db`
 - **Linux**: `~/.config/taskboard/taskboard.db`
+- **Windows**: `%AppData%	askboard	askboard.db`
 
 Migrations run automatically on first start.
 
