@@ -172,9 +172,11 @@ Project → Ticket → Subtask
 
 Every tool that takes a ticket `id` (or `ticketId`) also accepts a `key` such as `UE-71` (project prefix + number, case-insensitive). Tickets show `blockedBy` (IDs), `blockedByKeys`, `openBlockers` (blockers not yet `done`), `openBlockerKeys` and custom `fields`. `compact: true` drops the description and returns subtasks only as `subtasksDone` / `subtasksTotal` (omitted when zero).
 
+Write tools (`create_ticket`, `update_ticket`, `move_ticket`, `append_to_ticket`, `set_ticket_fields`, `add_dependency`, `remove_dependency`, `add_label`, `remove_label`) return a short acknowledgement instead of the whole ticket: `key`, `title`, `status`, tag names, `fields`, `blockedByKeys`, `openBlockerKeys` and subtask counts; use `get_ticket` for the description. `batch_create_subtasks` returns only `id` and `title` of each new subtask. All MCP results are compact JSON (no indentation).
+
 Before applying a pending database migration, taskboard writes a backup next to the database: `backups/pre-<migration>-<timestamp>.db`. If the backup fails, no migration runs.
 
-The web UI remembers the last opened project and tag filter, shows `class` / `stage` fields and a «заблокирован» badge on cards, and has board search plus quick filters by those fields.
+The web UI remembers the last opened project and tag filter, shows `class` / `stage` fields and a «заблокирован» badge on cards, and has board search plus quick filters by those fields. The left sidebar collapses to an icon rail (the button next to the logo); the state is remembered.
 
 #### Example Prompts
 
