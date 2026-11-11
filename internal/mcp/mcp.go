@@ -55,6 +55,20 @@ type schemaProp struct {
 	Description string      `json:"description"`
 	Enum        []string    `json:"enum,omitempty"`
 	Items       *jsonSchema `json:"items,omitempty"`
+
+	AdditionalProperties *schemaProp `json:"additionalProperties,omitempty"`
+}
+
+// ticketProps добавляет к схеме инструмента поля id и key, по которым определяется тикет.
+func ticketProps(extra map[string]schemaProp) map[string]schemaProp {
+	props := map[string]schemaProp{
+		"id":  {Type: "string", Description: "Ticket ID (a key such as UE-71 is accepted too)"},
+		"key": {Type: "string", Description: "Ticket key: project prefix + number, e.g. UE-71 (case-insensitive); alternative to id"},
+	}
+	for k, v := range extra {
+		props[k] = v
+	}
+	return props
 }
 
 type textContent struct {
@@ -157,7 +171,7 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 		}
 	}
 
-	data, _ := json.MarshalIndent(result, "", "  ")
+	data, _ := json.Marshal(result)
 	return &jsonrpcResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -165,6 +179,61 @@ func (s *MCPServer) handleToolCall(req jsonrpcRequest) *jsonrpcResponse {
 			"content": []textContent{{Type: "text", Text: string(data)}},
 		},
 	}
+}
+
+// ticketRef — ссылка на тикет: ID или ключ вида "UE-71" в любом из полей id, key, ticketId.
+type ticketRef struct {
+	ID       string `json:"id"`
+	Key      string `json:"key"`
+	TicketID string `json:"ticketId"`
+}
+
+func (s *MCPServer) resolve(r ticketRef) (string, error) {
+	for _, v := range []string{r.ID, r.Key, r.TicketID} {
+		if v != "" {
+			return s.store.ResolveTicketID(v)
+		}
+	}
+	return "", fmt.Errorf("ticket id or key is required")
+}
+
+// ticketAck — короткий ответ инструментов записи: ключ, заголовок, статус, имена тегов, поля, блокеры и счётчики подзадач.
+type ticketAck struct {
+	Key             string            `json:"key"`
+	Title           string            `json:"title"`
+	Status          string            `json:"status"`
+	Labels          []string          `json:"labels,omitempty"`
+	Fields          map[string]string `json:"fields,omitempty"`
+	BlockedByKeys   []string          `json:"blockedByKeys,omitempty"`
+	OpenBlockerKeys []string          `json:"openBlockerKeys,omitempty"`
+	SubtasksDone    int               `json:"subtasksDone,omitempty"`
+	SubtasksTotal   int               `json:"subtasksTotal,omitempty"`
+}
+
+const ackNote = "Returns a short acknowledgement: key, title, status, tag names, fields, blockedByKeys, openBlockerKeys and subtask counts (use get_ticket for the description)."
+
+func (s *MCPServer) ack(id string) (any, error) {
+	t, err := s.store.GetTicketCompact(id)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, fmt.Errorf("ticket not found")
+	}
+	a := ticketAck{
+		Key:             t.DisplayKey(),
+		Title:           t.Title,
+		Status:          t.Status,
+		Fields:          t.Fields,
+		BlockedByKeys:   t.BlockedByKeys,
+		OpenBlockerKeys: t.OpenBlockerKeys,
+		SubtasksDone:    t.SubtasksDone,
+		SubtasksTotal:   t.SubtasksTotal,
+	}
+	for _, l := range t.Labels {
+		a.Labels = append(a.Labels, l.Name)
+	}
+	return a, nil
 }
 
 func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
@@ -248,50 +317,156 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "get_ticket":
 		var a struct {
-			ID string `json:"id"`
+			ticketRef
+			Compact bool `json:"compact"`
 		}
 		json.Unmarshal(args, &a)
-		t, err := s.store.GetTicket(a.ID)
-		if t == nil && err == nil {
-			return nil, fmt.Errorf("ticket not found")
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
 		}
-		return t, err
+		if a.Compact {
+			return s.store.GetTicketCompact(id)
+		}
+		return s.store.GetTicket(id)
+
+	case "get_tickets":
+		var a struct {
+			Keys    []string `json:"keys"`
+			Compact bool     `json:"compact"`
+		}
+		json.Unmarshal(args, &a)
+		if len(a.Keys) == 0 {
+			return nil, fmt.Errorf("keys is required")
+		}
+		ids, err := s.store.ResolveTicketIDs(a.Keys)
+		if err != nil {
+			return nil, err
+		}
+		return s.store.GetTicketsByIDs(ids, a.Compact)
 
 	case "create_ticket":
 		var a models.CreateTicketRequest
 		json.Unmarshal(args, &a)
-		return s.store.CreateTicket(a)
+		blockers, err := s.store.ResolveTicketIDs(a.BlockedBy)
+		if err != nil {
+			return nil, err
+		}
+		a.BlockedBy = blockers
+		t, err := s.store.CreateTicket(a)
+		if err != nil {
+			return nil, err
+		}
+		return s.ack(t.ID)
 
 	case "update_ticket":
 		var a struct {
-			ID string `json:"id"`
+			ticketRef
 			models.UpdateTicketRequest
 		}
 		json.Unmarshal(args, &a)
-		return s.store.UpdateTicket(a.ID, a.UpdateTicketRequest)
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		if a.BlockedBy != nil {
+			if a.BlockedBy, err = s.store.ResolveTicketIDs(a.BlockedBy); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := s.store.UpdateTicket(id, a.UpdateTicketRequest); err != nil {
+			return nil, err
+		}
+		return s.ack(id)
 
 	case "move_ticket":
 		var a struct {
-			ID string `json:"id"`
+			ticketRef
 			models.MoveTicketRequest
 		}
 		json.Unmarshal(args, &a)
-		return s.store.MoveTicket(a.ID, a.MoveTicketRequest)
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.store.MoveTicket(id, a.MoveTicketRequest); err != nil {
+			return nil, err
+		}
+		return s.ack(id)
 
 	case "delete_ticket":
+		var a ticketRef
+		json.Unmarshal(args, &a)
+		id, err := s.resolve(a)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]bool{"deleted": true}, s.store.DeleteTicket(id)
+
+	case "append_to_ticket":
 		var a struct {
-			ID string `json:"id"`
+			ticketRef
+			Text string `json:"text"`
 		}
 		json.Unmarshal(args, &a)
-		return map[string]bool{"deleted": true}, s.store.DeleteTicket(a.ID)
+		if a.Text == "" {
+			return nil, fmt.Errorf("text is required")
+		}
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.store.AppendToTicket(id, a.Text); err != nil {
+			return nil, err
+		}
+		return s.ack(id)
+
+	case "set_ticket_fields":
+		var a struct {
+			ticketRef
+			Fields map[string]string `json:"fields"`
+		}
+		json.Unmarshal(args, &a)
+		if len(a.Fields) == 0 {
+			return nil, fmt.Errorf("fields is required")
+		}
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.store.SetTicketFields(id, a.Fields); err != nil {
+			return nil, err
+		}
+		return s.ack(id)
+
+	case "add_dependency", "remove_dependency":
+		var a struct {
+			ticketRef
+			BlockedBy string `json:"blockedBy"`
+		}
+		json.Unmarshal(args, &a)
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		blockerID, err := s.store.ResolveTicketID(a.BlockedBy)
+		if err != nil {
+			return nil, err
+		}
+		if name == "add_dependency" {
+			err = s.store.AddDependency(id, blockerID)
+		} else {
+			err = s.store.RemoveDependency(id, blockerID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return s.ack(id)
 
 	case "get_board":
-		var a struct {
-			ProjectID string `json:"projectId"`
-			Label     string `json:"label"`
-		}
+		var a models.TicketFilter
 		json.Unmarshal(args, &a)
-		return s.store.GetBoard(a.ProjectID, a.Label)
+		return s.store.GetBoard(a)
 
 	case "list_labels":
 		return s.store.ListLabels()
@@ -303,49 +478,75 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 
 	case "add_label":
 		var a struct {
-			TicketID string `json:"ticketId"`
-			Label    string `json:"label"`
+			ticketRef
+			Label string `json:"label"`
 		}
 		json.Unmarshal(args, &a)
-		return s.store.AddLabelToTicket(a.TicketID, a.Label)
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.store.AddLabelToTicket(id, a.Label); err != nil {
+			return nil, err
+		}
+		return s.ack(id)
 
 	case "remove_label":
 		var a struct {
-			TicketID string `json:"ticketId"`
-			Label    string `json:"label"`
+			ticketRef
+			Label string `json:"label"`
 		}
 		json.Unmarshal(args, &a)
-		return s.store.RemoveLabelFromTicket(a.TicketID, a.Label)
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := s.store.RemoveLabelFromTicket(id, a.Label); err != nil {
+			return nil, err
+		}
+		return s.ack(id)
 
 	case "create_subtask":
 		var a struct {
-			TicketID string `json:"ticketId"`
-			Title    string `json:"title"`
+			ticketRef
+			Title string `json:"title"`
 		}
 		json.Unmarshal(args, &a)
-		if a.TicketID == "" || a.Title == "" {
-			return nil, fmt.Errorf("ticketId and title are required")
+		if a.Title == "" {
+			return nil, fmt.Errorf("ticketId (or key) and title are required")
 		}
-		return s.store.AddSubtask(a.TicketID, models.CreateSubtaskRequest{Title: a.Title})
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		return s.store.AddSubtask(id, models.CreateSubtaskRequest{Title: a.Title})
 
 	case "batch_create_subtasks":
 		var a struct {
-			TicketID string `json:"ticketId"`
+			ticketRef
 			Subtasks []struct {
 				Title string `json:"title"`
 			} `json:"subtasks"`
 		}
 		json.Unmarshal(args, &a)
-		if a.TicketID == "" || len(a.Subtasks) == 0 {
-			return nil, fmt.Errorf("ticketId and at least one subtask are required")
+		if len(a.Subtasks) == 0 {
+			return nil, fmt.Errorf("ticketId (or key) and at least one subtask are required")
 		}
-		var created []models.Subtask
+		ticketID, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		type createdSubtask struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		var created []createdSubtask
 		for _, sub := range a.Subtasks {
-			st, err := s.store.AddSubtask(a.TicketID, models.CreateSubtaskRequest{Title: sub.Title})
+			st, err := s.store.AddSubtask(ticketID, models.CreateSubtaskRequest{Title: sub.Title})
 			if err != nil {
 				return nil, fmt.Errorf("creating subtask %q: %w", sub.Title, err)
 			}
-			created = append(created, *st)
+			created = append(created, createdSubtask{ID: st.ID, Title: st.Title})
 		}
 		return created, nil
 
@@ -503,50 +704,69 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		},
 		{
 			Name:        "add_label",
-			Description: "Attach a tag to a ticket without removing its other tags. The tag is looked up by ID or name (case-insensitive) and created if it does not exist.",
+			Description: "Attach a tag to a ticket without removing its other tags. The tag is looked up by ID or name (case-insensitive) and created if it does not exist. " + ackNote,
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"ticketId": {Type: "string", Description: "Ticket ID"},
+				Properties: ticketProps(map[string]schemaProp{
+					"ticketId": {Type: "string", Description: "Ticket ID or key (alternative to id / key)"},
 					"label":    {Type: "string", Description: "Tag name or tag ID"},
-				},
-				Required: []string{"ticketId", "label"},
+				}),
+				Required: []string{"label"},
 			},
 		},
 		{
 			Name:        "remove_label",
-			Description: "Detach a tag from a ticket. The tag itself is kept.",
+			Description: "Detach a tag from a ticket. The tag itself is kept. " + ackNote,
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"ticketId": {Type: "string", Description: "Ticket ID"},
+				Properties: ticketProps(map[string]schemaProp{
+					"ticketId": {Type: "string", Description: "Ticket ID or key (alternative to id / key)"},
 					"label":    {Type: "string", Description: "Tag name or tag ID"},
-				},
-				Required: []string{"ticketId", "label"},
+				}),
+				Required: []string{"label"},
 			},
 		},
 		// --- Tickets (tasks within a project) ---
 		{
-			Name:        "list_tickets",
-			Description: "List tickets with optional filters by project, team, status, priority, and tag",
+			Name: "list_tickets",
+			Description: "List tickets with optional filters by project, team, status, priority, tag, text search, custom field and readiness. " +
+				"Each ticket shows blockedBy (IDs), blockedByKeys (e.g. \"UE-80\"), openBlockers (count of blockers not yet done) and openBlockerKeys. " +
+				"Use compact=true to save tokens: no description, subtasks only as subtasksDone/subtasksTotal.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"projectId": {Type: "string", Description: "Filter by project ID"},
+					"projectId": {Type: "string", Description: "Filter by project ID or project prefix (e.g. UE)"},
 					"teamId":    {Type: "string", Description: "Filter by team ID"},
 					"status":    {Type: "string", Description: "Filter by status", Enum: models.TicketStatuses},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"label":     {Type: "string", Description: "Filter by tag name or ID"},
+					"search":    {Type: "string", Description: "Case-insensitive substring over key, title and description"},
+					"field":     {Type: "string", Description: "Custom field filter: \"name=value\" (value compared case-insensitively) or \"name\" (field is present)"},
+					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all done (or that have none)"},
+					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
 				},
 			},
 		},
 		{
 			Name:        "get_ticket",
-			Description: "Get detailed ticket information including subtasks, labels, and dependencies",
+			Description: "Get detailed ticket information including subtasks, labels, custom fields and dependencies. Accepts the ticket ID or its key (e.g. UE-71).",
 			InputSchema: jsonSchema{
-				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID"}},
-				Required:   []string{"id"},
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"compact": {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
+				}),
+			},
+		},
+		{
+			Name:        "get_tickets",
+			Description: "Get several tickets at once by key (e.g. UE-71) or ID, returned in the given order. Fails if any of them does not exist.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"keys":    {Type: "array", Description: "Ticket keys such as UE-71 (case-insensitive) or ticket IDs", Items: &jsonSchema{Type: "string"}},
+					"compact": {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
+				},
+				Required: []string{"keys"},
 			},
 		},
 		{
@@ -554,11 +774,11 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			Description: "Create a ticket (task) within a project. Tickets are concrete, actionable units of work. " +
 				"Do NOT create 'epic' or 'umbrella' tickets — use create_project for that level of grouping. " +
 				"Use create_subtask or batch_create_subtasks to break tickets into steps. " +
-				"Hierarchy: Project → Ticket → Subtask.",
+				"Hierarchy: Project → Ticket → Subtask. " + ackNote,
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"projectId":   {Type: "string", Description: "Project ID"},
+					"projectId":   {Type: "string", Description: "Project ID or project prefix (e.g. UE)"},
 					"title":       {Type: "string", Description: "Ticket title"},
 					"description": {Type: "string", Description: "Rich text description"},
 					"status":      {Type: "string", Description: "Initial status", Enum: models.TicketStatuses},
@@ -566,58 +786,108 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
 					"labels":      {Type: "array", Description: "Tag names (created automatically if new). Replaces existing tags on update.", Items: &jsonSchema{Type: "string"}},
+					"blockedBy":   {Type: "array", Description: "Keys (e.g. UE-80) or IDs of tickets that block this one", Items: &jsonSchema{Type: "string"}},
 				},
 				Required: []string{"projectId", "title"},
 			},
 		},
 		{
 			Name:        "update_ticket",
-			Description: "Update ticket properties",
+			Description: "Update ticket properties. Accepts the ticket ID or its key (e.g. UE-71). blockedBy, if given, replaces all dependencies (prefer add_dependency / remove_dependency). " + ackNote,
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":          {Type: "string", Description: "Ticket ID"},
+				Properties: ticketProps(map[string]schemaProp{
 					"title":       {Type: "string", Description: "Ticket title"},
-					"description": {Type: "string", Description: "Description"},
+					"description": {Type: "string", Description: "Description (replaces the whole text; use append_to_ticket to add to it)"},
 					"status":      {Type: "string", Description: "Status", Enum: models.TicketStatuses},
 					"priority":    {Type: "string", Description: "Priority", Enum: []string{"urgent", "high", "medium", "low"}},
 					"teamId":      {Type: "string", Description: "Team ID"},
 					"dueDate":     {Type: "string", Description: "Due date (YYYY-MM-DD)"},
 					"labels":      {Type: "array", Description: "Tag names (created automatically if new). Replaces existing tags on update.", Items: &jsonSchema{Type: "string"}},
-				},
-				Required: []string{"id"},
+					"blockedBy":   {Type: "array", Description: "Keys or IDs of blocking tickets; replaces existing dependencies", Items: &jsonSchema{Type: "string"}},
+				}),
 			},
 		},
 		{
 			Name:        "move_ticket",
-			Description: "Move ticket to a different status column",
+			Description: "Move ticket to a different status column. Accepts the ticket ID or its key (e.g. UE-71). " + ackNote,
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"id":     {Type: "string", Description: "Ticket ID"},
+				Properties: ticketProps(map[string]schemaProp{
 					"status": {Type: "string", Description: "Target status", Enum: models.TicketStatuses},
-				},
-				Required: []string{"id", "status"},
+				}),
+				Required: []string{"status"},
 			},
 		},
 		{
 			Name:        "delete_ticket",
-			Description: "Delete a ticket",
+			Description: "Delete a ticket. Accepts the ticket ID or its key (e.g. UE-71).",
 			InputSchema: jsonSchema{
 				Type:       "object",
-				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Ticket ID"}},
-				Required:   []string{"id"},
+				Properties: ticketProps(nil),
+			},
+		},
+		{
+			Name: "append_to_ticket",
+			Description: "Append text to the ticket description atomically in a single SQL statement (no read-modify-write race): the text is added after a blank line. " +
+				"Prefer this over update_ticket when only adding notes. " + ackNote,
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"text": {Type: "string", Description: "Text to append"},
+				}),
+				Required: []string{"text"},
+			},
+		},
+		{
+			Name: "set_ticket_fields",
+			Description: "Set custom key/value fields on a ticket (e.g. class, stage). Field names are case-insensitive (stored lowercase). " +
+				"An empty value deletes the field. Other fields are left untouched. " + ackNote,
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"fields": {Type: "object", Description: "Map of field name to value, e.g. {\"class\": \"core\", \"stage\": \"3\"}; \"\" deletes the field", AdditionalProperties: &schemaProp{Type: "string"}},
+				}),
+				Required: []string{"fields"},
+			},
+		},
+		{
+			Name: "add_dependency",
+			Description: "Make a ticket blocked by another one. Both are given by ID or key (e.g. UE-80). Self-dependencies and dependency cycles are rejected. " +
+				ackNote,
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"blockedBy": {Type: "string", Description: "ID or key of the ticket that blocks this one"},
+				}),
+				Required: []string{"blockedBy"},
+			},
+		},
+		{
+			Name:        "remove_dependency",
+			Description: "Remove a dependency: the ticket is no longer blocked by the given ticket. Both are given by ID or key. " + ackNote,
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"blockedBy": {Type: "string", Description: "ID or key of the blocking ticket to remove"},
+				}),
+				Required: []string{"blockedBy"},
 			},
 		},
 		// --- Board ---
 		{
-			Name:        "get_board",
-			Description: "Get full Kanban board grouped by status columns (todo, in_progress, ready_for_review, done)",
+			Name: "get_board",
+			Description: "Get full Kanban board grouped by status columns (todo, in_progress, ready_for_review, done). " +
+				"Use compact=true to save tokens: no description, subtasks only as subtasksDone/subtasksTotal.",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
-					"projectId": {Type: "string", Description: "Filter by project ID (optional)"},
+					"projectId": {Type: "string", Description: "Filter by project ID or project prefix, e.g. UE (optional)"},
 					"label":     {Type: "string", Description: "Show only tickets with this tag name or ID (optional)"},
+					"search":    {Type: "string", Description: "Case-insensitive substring over key, title and description (optional)"},
+					"field":     {Type: "string", Description: "Custom field filter: \"name=value\" or \"name\" (optional)"},
+					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all done (default false)"},
+					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
 				},
 			},
 		},
@@ -628,11 +898,11 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"Hierarchy: Project → Ticket → Subtask. Use batch_create_subtasks when adding multiple subtasks at once.",
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"ticketId": {Type: "string", Description: "Parent ticket ID"},
+				Properties: ticketProps(map[string]schemaProp{
+					"ticketId": {Type: "string", Description: "Parent ticket ID or key (alternative to id / key)"},
 					"title":    {Type: "string", Description: "Subtask description"},
-				},
-				Required: []string{"ticketId", "title"},
+				}),
+				Required: []string{"title"},
 			},
 		},
 		{
@@ -641,8 +911,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				"Use this when breaking a ticket into its implementation steps.",
 			InputSchema: jsonSchema{
 				Type: "object",
-				Properties: map[string]schemaProp{
-					"ticketId": {Type: "string", Description: "Parent ticket ID"},
+				Properties: ticketProps(map[string]schemaProp{
+					"ticketId": {Type: "string", Description: "Parent ticket ID or key (alternative to id / key)"},
 					"subtasks": {Type: "array", Description: "Array of subtask objects, each with a 'title' field", Items: &jsonSchema{
 						Type: "object",
 						Properties: map[string]schemaProp{
@@ -650,8 +920,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 						},
 						Required: []string{"title"},
 					}},
-				},
-				Required: []string{"ticketId", "subtasks"},
+				}),
+				Required: []string{"subtasks"},
 			},
 		},
 		{

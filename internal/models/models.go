@@ -53,6 +53,13 @@ type Ticket struct {
 	Labels        []Label   `json:"labels,omitempty"`
 	Subtasks      []Subtask `json:"subtasks,omitempty"`
 	BlockedBy     []string  `json:"blockedBy,omitempty"`
+
+	Fields          map[string]string `json:"fields,omitempty"`
+	BlockedByKeys   []string          `json:"blockedByKeys,omitempty"`
+	OpenBlockers    int               `json:"openBlockers,omitempty"`
+	OpenBlockerKeys []string          `json:"openBlockerKeys,omitempty"`
+	SubtasksDone    int               `json:"subtasksDone,omitempty"`
+	SubtasksTotal   int               `json:"subtasksTotal,omitempty"`
 }
 
 // DisplayKey returns the human-readable ticket key like "AUTH-1"
@@ -189,4 +196,12 @@ type TicketFilter struct {
 	Status    string
 	Priority  string
 	Label     string // ID или имя тега
+	Search    string // подстрока в ключе, заголовке или описании, без учёта регистра
+	Field     string // "имя=значение" или "имя" (поле задано)
+	Unblocked bool   // только тикеты, у которых все блокирующие тикеты в статусе done
+	Compact   bool   // без описания, подзадачи только счётчиками
+}
+
+type AddDependencyRequest struct {
+	BlockedBy string `json:"blockedBy"` // ID или ключ блокирующего тикета
 }

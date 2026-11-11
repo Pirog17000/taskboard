@@ -18,7 +18,7 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 - **Tickets** — priority levels, due dates, tags (labels) for grouping into sections such as waves or plan stages, subtasks, dependencies (blocked by)
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI (macOS and Linux only)
 - **CLI** — manage everything from the terminal
-- **MCP Server** — 25 tools for AI-native project management via Model Context Protocol
+- **MCP Server** — 30 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
 - **Single Binary** — `brew install` on macOS/Linux, or build one `taskboard.exe` on Windows
 - **Cross-platform** — macOS, Linux, and Windows
@@ -129,7 +129,7 @@ Project → Ticket → Subtask
 - **Tickets** are concrete, actionable tasks within a project. Don't create "epic" tickets — use projects.
 - **Subtasks** are checklist steps within a ticket, for breaking work into verifiable pieces.
 
-#### Available MCP Tools (25)
+#### Available MCP Tools (30)
 
 | Tool                    | Description                                      |
 | ----------------------- | ------------------------------------------------ |
@@ -146,24 +146,35 @@ Project → Ticket → Subtask
 | `update_team`           | Update team properties                           |
 | `delete_team`           | Delete a team                                    |
 | **Tickets**             |                                                  |
-| `list_tickets`          | List tickets with filters                        |
-| `get_ticket`            | Get ticket details with subtasks and labels      |
+| `list_tickets`          | List tickets with filters: project (ID or prefix), team, status, priority, tag, `search` (substring over key/title/description), `field` (`name=value` or `name`), `unblocked` (all blockers done), `compact` |
+| `get_ticket`            | Get ticket details by ID or key (`UE-71`); `compact` omits description and returns subtask counts |
+| `get_tickets`           | Get several tickets by `keys` in the given order (optional `compact`) |
 | `create_ticket`         | Create a ticket (task) within a project          |
 | `update_ticket`         | Update ticket properties                         |
 | `move_ticket`           | Move ticket to different status column           |
 | `delete_ticket`         | Delete a ticket                                  |
+| `append_to_ticket`      | Atomically append text to the description (single SQL statement) |
+| `set_ticket_fields`     | Set custom key/value fields (e.g. `class`, `stage`); an empty value deletes the field |
+| `add_dependency`        | Block a ticket by another one (self-dependencies and cycles are rejected) |
+| `remove_dependency`     | Remove a dependency                              |
 | **Labels (tags)**       |                                                  |
 | `list_labels`           | List all tags                                    |
 | `create_label`          | Create a tag (returns the existing one if the name exists) |
 | `add_label`             | Attach a tag to a ticket by name or ID (created if missing) |
 | `remove_label`          | Detach a tag from a ticket                       |
 | **Board**               |                                                  |
-| `get_board`             | Get full Kanban board grouped by status (optionally filtered by tag) |
+| `get_board`             | Get full Kanban board grouped by status (optionally filtered by project, tag, `search`, `field`, `unblocked`; `compact` saves tokens) |
 | **Subtasks**            |                                                  |
 | `create_subtask`        | Add a subtask to a ticket                        |
 | `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
 | `toggle_subtask`        | Toggle subtask completion                        |
 | `delete_subtask`        | Remove a subtask from a ticket                   |
+
+Every tool that takes a ticket `id` (or `ticketId`) also accepts a `key` such as `UE-71` (project prefix + number, case-insensitive). Tickets show `blockedBy` (IDs), `blockedByKeys`, `openBlockers` (blockers not yet `done`), `openBlockerKeys` and custom `fields`. `compact: true` drops the description and returns subtasks only as `subtasksDone` / `subtasksTotal` (omitted when zero).
+
+Before applying a pending database migration, taskboard writes a backup next to the database: `backups/pre-<migration>-<timestamp>.db`. If the backup fails, no migration runs.
+
+The web UI remembers the last opened project and tag filter, shows `class` / `stage` fields and a «заблокирован» badge on cards, and has board search plus quick filters by those fields.
 
 #### Example Prompts
 

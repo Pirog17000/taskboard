@@ -23,12 +23,35 @@ import {
   FolderKanban,
   Users,
   Plus,
+  Lock,
+  Search,
 } from "lucide-react";
 import { api, type Ticket, type TicketInput, type Project, type Team, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS } from "../lib/statuses";
 import { allTags, tagNames } from "../lib/tags";
+import { CARD_FIELDS, FIELD_FILTER_LABELS, fieldValues, matchesSearch } from "../lib/fields";
+
+const STORAGE_PROJECT = "taskboard.board.project";
+const STORAGE_TAG = "taskboard.board.tag";
+
+function readStored(key: string): string {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStored(key: string, value: string) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    // localStorage недоступен: просто не запоминаем
+  }
+}
 
 const PRIORITY_CONFIG: Record<string, { color: string; icon: typeof ArrowUp }> = {
   urgent: { color: "text-red-500", icon: AlertTriangle },
@@ -99,6 +122,28 @@ function TicketCard({
         <PriorityBadge priority={ticket.priority} />
       </div>
       <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
+      {(ticket.openBlockers ?? 0) > 0 && (
+        <span
+          className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-400"
+          title="Ждёт завершения этих тикетов"
+        >
+          <Lock className="w-3 h-3" />
+          заблокирован: {(ticket.openBlockerKeys || []).join(", ")}
+        </span>
+      )}
+      {CARD_FIELDS.some((name) => ticket.fields?.[name]) && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {CARD_FIELDS.filter((name) => ticket.fields?.[name]).map((name) => (
+            <span
+              key={name}
+              title={name}
+              className="inline-flex items-center rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300"
+            >
+              {ticket.fields?.[name]}
+            </span>
+          ))}
+        </div>
+      )}
       {(project || team) && (
         <div className="flex flex-wrap items-center gap-1.5">
           {project && (
@@ -226,8 +271,10 @@ function Column({
 export default function Board() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string>("");
-  const [selectedTag, setSelectedTag] = useState<string>("");
+  const [selectedProject, setSelectedProject] = useState<string>(() => readStored(STORAGE_PROJECT));
+  const [selectedTag, setSelectedTag] = useState<string>(() => readStored(STORAGE_TAG));
+  const [search, setSearch] = useState("");
+  const [fieldFilters, setFieldFilters] = useState<Record<string, string>>({});
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -251,21 +298,40 @@ export default function Board() {
   }, [selectedProject]);
 
   useEffect(() => {
-    api.projects.list().then(setProjects).catch(() => setProjects([]));
+    api.projects
+      .list()
+      .then((list) => {
+        setProjects(list);
+        // Запомненный проект мог быть удалён
+        setSelectedProject((current) => (current && !list.some((p) => p.id === current) ? "" : current));
+      })
+      .catch(() => setProjects([]));
     api.teams.list().then(setTeams).catch(() => setTeams([]));
   }, []);
+
+  useEffect(() => {
+    writeStored(STORAGE_PROJECT, selectedProject);
+    writeStored(STORAGE_TAG, selectedTag);
+  }, [selectedProject, selectedTag]);
 
   useEffect(() => {
     setLoading(true);
     loadBoard();
   }, [loadBoard]);
 
+  const allBoardTickets = columns.flatMap((c) => c.tickets);
+  const boardTags = allTags(allBoardTickets);
+  // Запомненного тега может уже не быть на доске
+  const activeTag = boardTags.includes(selectedTag) ? selectedTag : "";
+
   const getColumnTickets = (status: string) =>
     (columns.find((c) => c.status === status)?.tickets || []).filter(
-      (t) => !selectedTag || tagNames(t).includes(selectedTag)
+      (t) =>
+        (!activeTag || tagNames(t).includes(activeTag)) &&
+        matchesSearch(t, search) &&
+        CARD_FIELDS.every((name) => !fieldFilters[name] || t.fields?.[name] === fieldFilters[name])
     );
 
-  const allBoardTickets = columns.flatMap((c) => c.tickets);
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -358,7 +424,11 @@ export default function Board() {
         <h1 className="text-lg font-semibold text-white">Board</h1>
         <select
           value={selectedProject}
-          onChange={(e) => setSelectedProject(e.target.value)}
+          onChange={(e) => {
+            setSelectedProject(e.target.value);
+            setSelectedTag("");
+            setFieldFilters({});
+          }}
           className="bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           <option value="">All Projects</option>
@@ -369,17 +439,45 @@ export default function Board() {
           ))}
         </select>
         <select
-          value={selectedTag}
+          value={activeTag}
           onChange={(e) => setSelectedTag(e.target.value)}
           className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           <option value="">All Tags</option>
-          {allTags(allBoardTickets).map((tag) => (
+          {boardTags.map((tag) => (
             <option key={tag} value={tag}>
               {tag}
             </option>
           ))}
         </select>
+        {CARD_FIELDS.map((name) => {
+          const values = fieldValues(allBoardTickets, name);
+          if (values.length === 0 && !fieldFilters[name]) return null;
+          return (
+            <select
+              key={name}
+              value={fieldFilters[name] || ""}
+              onChange={(e) => setFieldFilters((prev) => ({ ...prev, [name]: e.target.value }))}
+              className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">{FIELD_FILTER_LABELS[name]}</option>
+              {values.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          );
+        })}
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Поиск: номер, название, описание"
+            className="w-64 bg-slate-800 text-xs text-slate-300 placeholder:text-slate-600 rounded-md border border-slate-700 pl-8 pr-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </div>
       </header>
 
       <div className="flex-1 overflow-x-auto p-6">

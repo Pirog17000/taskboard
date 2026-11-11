@@ -76,6 +76,10 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Post("/{id}/move", s.moveTicket)
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
+			r.Get("/{id}/fields", s.getTicketFields)
+			r.Put("/{id}/fields", s.setTicketFields)
+			r.Post("/{id}/dependencies", s.addDependency)
+			r.Delete("/{id}/dependencies/{blocker}", s.removeDependency)
 		})
 
 		r.Route("/subtasks", func(r chi.Router) {
@@ -371,6 +375,111 @@ func (s *Server) deleteTicket(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// resolveTicket превращает параметр пути (ID или ключ) в ID тикета; при ошибке сам пишет ответ.
+func (s *Server) resolveTicket(w http.ResponseWriter, ref string) (string, bool) {
+	id, err := s.store.ResolveTicketID(ref)
+	if errors.Is(err, db.ErrTicketNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return "", false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return "", false
+	}
+	return id, true
+}
+
+func (s *Server) writeTicket(w http.ResponseWriter, id string) {
+	t, err := s.store.GetTicket(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *Server) getTicketFields(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.resolveTicket(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	t, err := s.store.GetTicket(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	fields := t.Fields
+	if fields == nil {
+		fields = map[string]string{}
+	}
+	writeJSON(w, http.StatusOK, fields)
+}
+
+// setTicketFields принимает {имя: значение}; пустое значение удаляет поле. Отвечает тикетом.
+func (s *Server) setTicketFields(w http.ResponseWriter, r *http.Request) {
+	var fields map[string]string
+	if err := decodeJSON(r, &fields); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	id, ok := s.resolveTicket(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	err := s.store.SetTicketFields(id, fields)
+	if errors.Is(err, db.ErrInvalidField) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeTicket(w, id)
+}
+
+func (s *Server) addDependency(w http.ResponseWriter, r *http.Request) {
+	var req models.AddDependencyRequest
+	if err := decodeJSON(r, &req); err != nil || req.BlockedBy == "" {
+		writeError(w, http.StatusBadRequest, "blockedBy is required")
+		return
+	}
+	id, ok := s.resolveTicket(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	blockerID, ok := s.resolveTicket(w, req.BlockedBy)
+	if !ok {
+		return
+	}
+	err := s.store.AddDependency(id, blockerID)
+	if errors.Is(err, db.ErrInvalidDependency) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeTicket(w, id)
+}
+
+func (s *Server) removeDependency(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.resolveTicket(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	blockerID, ok := s.resolveTicket(w, chi.URLParam(r, "blocker"))
+	if !ok {
+		return
+	}
+	if err := s.store.RemoveDependency(id, blockerID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeTicket(w, id)
+}
+
 func (s *Server) addSubtask(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateSubtaskRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -463,8 +572,10 @@ func (s *Server) deleteLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getBoard(w http.ResponseWriter, r *http.Request) {
-	projectID := r.URL.Query().Get("projectId")
-	board, err := s.store.GetBoard(projectID, r.URL.Query().Get("label"))
+	board, err := s.store.GetBoard(models.TicketFilter{
+		ProjectID: r.URL.Query().Get("projectId"),
+		Label:     r.URL.Query().Get("label"),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

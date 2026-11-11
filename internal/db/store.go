@@ -26,6 +26,7 @@ func NewStore(database *sql.DB) *Store {
 func (s *Store) ClearData() error {
 	tables := []string{
 		"ticket_dependencies",
+		"ticket_fields",
 		"ticket_labels",
 		"subtasks",
 		"tickets",
@@ -224,15 +225,12 @@ func (s *Store) nextTicketNumber(projectID string) (int, error) {
 }
 
 func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error) {
-	query := `SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
-		COALESCE(p.prefix, '') as project_prefix
-		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE 1=1`
+	query := "SELECT " + ticketColumns + ticketFrom + " WHERE 1=1"
 	args := []any{}
 
 	if filter.ProjectID != "" {
 		query += " AND t.project_id = ?"
-		args = append(args, filter.ProjectID)
+		args = append(args, s.resolveProjectID(filter.ProjectID))
 	}
 	if filter.TeamID != "" {
 		query += " AND t.team_id = ?"
@@ -254,8 +252,7 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 		if len(labelIDs) == 0 {
 			query += " AND 0 = 1"
 		} else {
-			placeholders := strings.TrimSuffix(strings.Repeat("?,", len(labelIDs)), ",")
-			query += " AND t.id IN (SELECT ticket_id FROM ticket_labels WHERE label_id IN (" + placeholders + "))"
+			query += " AND t.id IN (SELECT ticket_id FROM ticket_labels WHERE label_id IN (" + placeholders(len(labelIDs)) + "))"
 			for _, id := range labelIDs {
 				args = append(args, id)
 			}
@@ -267,56 +264,52 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var tickets []models.Ticket
-	for rows.Next() {
-		var t models.Ticket
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
-			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-			&t.ProjectPrefix); err != nil {
-			return nil, err
-		}
-		tickets = append(tickets, t)
-	}
-	if err := rows.Err(); err != nil {
+	tickets, err := scanTickets(rows)
+	if err != nil {
 		return nil, err
 	}
 
-	for i := range tickets {
-		tickets[i].Labels, _ = s.getTicketLabels(tickets[i].ID)
-		tickets[i].Subtasks, _ = s.getTicketSubtasks(tickets[i].ID)
-		tickets[i].BlockedBy, _ = s.getTicketBlockedBy(tickets[i].ID)
+	if q := strings.ToLower(strings.TrimSpace(filter.Search)); q != "" {
+		kept := tickets[:0]
+		for _, t := range tickets {
+			if matchesSearch(t, q) {
+				kept = append(kept, t)
+			}
+		}
+		tickets = kept
+	}
+
+	if err := s.populate(tickets, filter.Compact); err != nil {
+		return nil, err
+	}
+
+	if filter.Field != "" || filter.Unblocked {
+		kept := tickets[:0]
+		for _, t := range tickets {
+			if filter.Field != "" && !matchesField(t, filter.Field) {
+				continue
+			}
+			if filter.Unblocked && t.OpenBlockers > 0 {
+				continue
+			}
+			kept = append(kept, t)
+		}
+		tickets = kept
 	}
 
 	return tickets, nil
 }
 
 func (s *Store) GetTicket(id string) (*models.Ticket, error) {
-	var t models.Ticket
-	err := s.db.QueryRow(
-		`SELECT t.id, t.project_id, t.team_id, t.number, t.title, t.description,
-		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
-		COALESCE(p.prefix, '') as project_prefix
-		FROM tickets t LEFT JOIN projects p ON t.project_id = p.id WHERE t.id = ?`, id,
-	).Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-		&t.ProjectPrefix)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
+	tickets, err := s.GetTicketsByIDs([]string{id}, false)
+	if err != nil || len(tickets) == 0 {
 		return nil, err
 	}
-
-	t.Labels, _ = s.getTicketLabels(t.ID)
-	t.Subtasks, _ = s.getTicketSubtasks(t.ID)
-	t.BlockedBy, _ = s.getTicketBlockedBy(t.ID)
-
-	return &t, nil
+	return &tickets[0], nil
 }
 
 func (s *Store) CreateTicket(req models.CreateTicketRequest) (*models.Ticket, error) {
+	req.ProjectID = s.resolveProjectID(req.ProjectID)
 	num, err := s.nextTicketNumber(req.ProjectID)
 	if err != nil {
 		return nil, fmt.Errorf("getting next ticket number: %w", err)
@@ -474,31 +467,26 @@ func (s *Store) DeleteTicket(id string) error {
 	return err
 }
 
-func (s *Store) GetBoard(projectID, label string) (*models.Board, error) {
-	statuses := models.TicketStatuses
+func (s *Store) GetBoard(filter models.TicketFilter) (*models.Board, error) {
+	tickets, err := s.ListTickets(filter)
+	if err != nil {
+		return nil, err
+	}
+
 	board := &models.Board{
-		ProjectID: projectID,
-		Columns:   make([]models.Column, len(statuses)),
+		ProjectID: filter.ProjectID,
+		Columns:   make([]models.Column, len(models.TicketStatuses)),
 	}
-
-	for i, status := range statuses {
-		filter := models.TicketFilter{Status: status, Label: label}
-		if projectID != "" {
-			filter.ProjectID = projectID
-		}
-		tickets, err := s.ListTickets(filter)
-		if err != nil {
-			return nil, err
-		}
-		if tickets == nil {
-			tickets = []models.Ticket{}
-		}
-		board.Columns[i] = models.Column{
-			Status:  status,
-			Tickets: tickets,
+	columnOf := make(map[string]int, len(models.TicketStatuses))
+	for i, status := range models.TicketStatuses {
+		columnOf[status] = i
+		board.Columns[i] = models.Column{Status: status, Tickets: []models.Ticket{}}
+	}
+	for _, t := range tickets {
+		if i, ok := columnOf[t.Status]; ok {
+			board.Columns[i].Tickets = append(board.Columns[i].Tickets, t)
 		}
 	}
-
 	return board, nil
 }
 
@@ -678,62 +666,4 @@ func (s *Store) ToggleSubtask(id string) (*models.Subtask, error) {
 func (s *Store) DeleteSubtask(id string) error {
 	_, err := s.db.Exec("DELETE FROM subtasks WHERE id = ?", id)
 	return err
-}
-
-func (s *Store) getTicketLabels(ticketID string) ([]models.Label, error) {
-	rows, err := s.db.Query(
-		"SELECT l.id, l.name, l.color FROM labels l JOIN ticket_labels tl ON l.id = tl.label_id WHERE tl.ticket_id = ?",
-		ticketID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var labels []models.Label
-	for rows.Next() {
-		var l models.Label
-		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
-			return nil, err
-		}
-		labels = append(labels, l)
-	}
-	return labels, rows.Err()
-}
-
-func (s *Store) getTicketSubtasks(ticketID string) ([]models.Subtask, error) {
-	rows, err := s.db.Query(
-		"SELECT id, ticket_id, title, completed, position FROM subtasks WHERE ticket_id = ? ORDER BY position",
-		ticketID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var subtasks []models.Subtask
-	for rows.Next() {
-		var st models.Subtask
-		if err := rows.Scan(&st.ID, &st.TicketID, &st.Title, &st.Completed, &st.Position); err != nil {
-			return nil, err
-		}
-		subtasks = append(subtasks, st)
-	}
-	return subtasks, rows.Err()
-}
-
-func (s *Store) getTicketBlockedBy(ticketID string) ([]string, error) {
-	rows, err := s.db.Query("SELECT blocked_by_id FROM ticket_dependencies WHERE ticket_id = ?", ticketID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	return ids, rows.Err()
 }

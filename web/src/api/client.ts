@@ -48,6 +48,10 @@ export interface Ticket {
   labels: Label[];
   subtasks: Subtask[];
   blockedBy: string[];
+  blockedByKeys?: string[];
+  openBlockers?: number;
+  openBlockerKeys?: string[];
+  fields?: Record<string, string>;
 }
 
 // Данные для создания/изменения тикета. labels — имена тегов (новые создаются автоматически).
@@ -130,6 +134,20 @@ export const api = {
       request<Ticket>(`/api/tickets/${id}/move`, {
         method: "POST",
         body: JSON.stringify({ status, position }),
+      }),
+    setFields: (id: string, fields: Record<string, string>) =>
+      request<Ticket>(`/api/tickets/${id}/fields`, {
+        method: "PUT",
+        body: JSON.stringify(fields),
+      }),
+    addDependency: (id: string, blockedBy: string) =>
+      request<Ticket>(`/api/tickets/${id}/dependencies`, {
+        method: "POST",
+        body: JSON.stringify({ blockedBy }),
+      }),
+    removeDependency: (id: string, blockedBy: string) =>
+      request<Ticket>(`/api/tickets/${id}/dependencies/${encodeURIComponent(blockedBy)}`, {
+        method: "DELETE",
       }),
     addSubtask: (id: string, title: string) =>
       request<Subtask>(`/api/tickets/${id}/subtasks`, {

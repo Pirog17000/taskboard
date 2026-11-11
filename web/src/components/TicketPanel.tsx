@@ -31,6 +31,13 @@ export default function TicketPanel({
   const [subtasks, setSubtasks] = useState<Subtask[]>(ticket.subtasks || []);
   const [newSubtask, setNewSubtask] = useState("");
   const [tags, setTags] = useState(tagNames(ticket).join(", "));
+  const [fields, setFields] = useState<Record<string, string>>(ticket.fields || {});
+  const [newFieldName, setNewFieldName] = useState("");
+  const [newFieldValue, setNewFieldValue] = useState("");
+  const [blockedByKeys, setBlockedByKeys] = useState<string[]>(ticket.blockedByKeys || []);
+  const [openBlockerKeys, setOpenBlockerKeys] = useState<string[]>(ticket.openBlockerKeys || []);
+  const [newBlocker, setNewBlocker] = useState("");
+  const [depError, setDepError] = useState("");
   const [dirty, setDirty] = useState(false);
   const [descMode, setDescMode] = useState<"preview" | "write">(description ? "preview" : "write");
 
@@ -47,6 +54,43 @@ export default function TicketPanel({
       labels: parseTags(tags),
     });
     setDirty(false);
+  };
+
+  const applyFields = (t: Ticket) => setFields(t.fields || {});
+
+  const applyDependencies = (t: Ticket) => {
+    setBlockedByKeys(t.blockedByKeys || []);
+    setOpenBlockerKeys(t.openBlockerKeys || []);
+  };
+
+  // Пустое значение удаляет поле.
+  const handleSaveField = async (name: string, value: string) => {
+    if ((ticket.fields?.[name] ?? "") === value.trim() && value) return;
+    applyFields(await api.tickets.setFields(ticket.id, { [name]: value }));
+  };
+
+  const handleAddField = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFieldName.trim() || !newFieldValue.trim()) return;
+    applyFields(await api.tickets.setFields(ticket.id, { [newFieldName]: newFieldValue }));
+    setNewFieldName("");
+    setNewFieldValue("");
+  };
+
+  const handleAddDependency = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBlocker.trim()) return;
+    try {
+      applyDependencies(await api.tickets.addDependency(ticket.id, newBlocker.trim()));
+      setNewBlocker("");
+      setDepError("");
+    } catch (err) {
+      setDepError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleRemoveDependency = async (key: string) => {
+    applyDependencies(await api.tickets.removeDependency(ticket.id, key));
   };
 
   const handleAddSubtask = async (e: React.FormEvent) => {
@@ -262,6 +306,100 @@ export default function TicketPanel({
               Save Changes
             </button>
           )}
+
+          <div>
+            <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+              Поля
+            </h4>
+            <div className="space-y-1.5">
+              {Object.keys(fields)
+                .sort()
+                .map((name) => (
+                  <div key={name} className="flex items-center gap-2">
+                    <span className="w-28 shrink-0 truncate text-sm text-slate-500" title={name}>
+                      {name}
+                    </span>
+                    <input
+                      value={fields[name]}
+                      onChange={(e) => setFields((prev) => ({ ...prev, [name]: e.target.value }))}
+                      onBlur={() => handleSaveField(name, fields[name])}
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                    <button
+                      onClick={() => handleSaveField(name, "")}
+                      className="text-slate-600 hover:text-red-400 transition-colors"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+            </div>
+            <form onSubmit={handleAddField} className="mt-2 flex gap-2">
+              <input
+                value={newFieldName}
+                onChange={(e) => setNewFieldName(e.target.value)}
+                placeholder="Поле (например, class)"
+                className="w-40 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <input
+                value={newFieldValue}
+                onChange={(e) => setNewFieldValue(e.target.value)}
+                placeholder="Значение"
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                type="submit"
+                className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
+              >
+                Add
+              </button>
+            </form>
+          </div>
+
+          <div>
+            <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+              Зависимости
+            </h4>
+            <div className="space-y-1.5">
+              {blockedByKeys.map((key) => (
+                <div
+                  key={key}
+                  className="flex items-center gap-2.5 group px-2 py-1.5 rounded-md hover:bg-slate-800/50"
+                >
+                  <span className="text-sm font-mono text-slate-300">{key}</span>
+                  <span
+                    className={`text-xs ${openBlockerKeys.includes(key) ? "text-red-400" : "text-green-500"}`}
+                  >
+                    {openBlockerKeys.includes(key) ? "блокирует" : "готово"}
+                  </span>
+                  <button
+                    onClick={() => handleRemoveDependency(key)}
+                    className="ml-auto opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+              {blockedByKeys.length === 0 && (
+                <div className="px-2 text-sm text-slate-600">Тикет ничем не заблокирован</div>
+              )}
+            </div>
+            <form onSubmit={handleAddDependency} className="mt-2 flex gap-2">
+              <input
+                value={newBlocker}
+                onChange={(e) => setNewBlocker(e.target.value)}
+                placeholder="Заблокирован тикетом (например, UE-80)"
+                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <button
+                type="submit"
+                className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
+              >
+                Add
+              </button>
+            </form>
+            {depError && <p className="mt-1.5 text-xs text-red-400">{depError}</p>}
+          </div>
 
           <div>
             <h4 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
