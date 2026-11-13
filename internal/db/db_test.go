@@ -172,8 +172,38 @@ func TestTicketLookupFieldsDependenciesCompact(t *testing.T) {
 		t.Fatalf("full: %+v", full)
 	}
 
+	q1, err := s.AddQuestion(a.ID, models.CreateQuestionRequest{Text: "Какой порт?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddQuestion(a.ID, models.CreateQuestionRequest{Text: "Второй?"}); err != nil {
+		t.Fatal(err)
+	}
+	answered, err := s.AnswerQuestion(q1.ID, "8080")
+	if err != nil || answered.Answer != "8080" || answered.AnsweredAt == nil {
+		t.Fatalf("answer: %+v %v", answered, err)
+	}
+	if _, err := s.AnswerQuestion("missing", "x"); !errors.Is(err, ErrQuestionNotFound) {
+		t.Fatalf("want question not found, got %v", err)
+	}
+	compact, _ = s.GetTicketCompact(a.ID)
+	if compact.Questions != nil || compact.QuestionsTotal != 2 || compact.QuestionsOpen != 1 {
+		t.Fatalf("compact questions: %+v", compact)
+	}
+	full, _ = s.GetTicket(a.ID)
+	if len(full.Questions) != 2 || full.Questions[0].Answer != "8080" || full.Questions[1].Position != 1 || full.Questions[1].AnsweredAt != nil {
+		t.Fatalf("full questions: %+v", full.Questions)
+	}
+	if err := s.DeleteQuestion(q1.ID); err != nil {
+		t.Fatal(err)
+	}
+	full, _ = s.GetTicket(a.ID)
+	if len(full.Questions) != 1 {
+		t.Fatalf("question not deleted: %+v", full.Questions)
+	}
+
 	board, err := s.GetBoard(models.TicketFilter{ProjectID: "UE", Compact: true})
-	if err != nil || len(board.Columns) != 4 || len(board.Columns[3].Tickets) != 1 || len(board.Columns[0].Tickets) != 2 {
+	if err != nil || len(board.Columns) != 7 || len(board.Columns[5].Tickets) != 1 || len(board.Columns[2].Tickets) != 2 {
 		t.Fatalf("board: %+v %v", board, err)
 	}
 }

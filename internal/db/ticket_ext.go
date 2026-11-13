@@ -166,10 +166,16 @@ func (s *Store) populate(tickets []models.Ticket, compact bool) error {
 		if err := s.populateSubtasks(index, in, args, compact); err != nil {
 			return err
 		}
+		if err := s.populateQuestions(index, in, args, compact); err != nil {
+			return err
+		}
 		if err := s.populateFields(index, in, args); err != nil {
 			return err
 		}
 		if err := s.populateDependencies(index, in, args); err != nil {
+			return err
+		}
+		if err := s.populateLinks(index, in, args); err != nil {
 			return err
 		}
 	}
@@ -274,7 +280,7 @@ func (s *Store) populateDependencies(index map[string]*models.Ticket, in string,
 		t := index[ticketID]
 		t.BlockedBy = append(t.BlockedBy, blockerID)
 		t.BlockedByKeys = append(t.BlockedByKeys, key)
-		if status != "done" {
+		if !models.IsClosedTicketStatus(status) {
 			t.OpenBlockers++
 			t.OpenBlockerKeys = append(t.OpenBlockerKeys, key)
 		}

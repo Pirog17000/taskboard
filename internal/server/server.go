@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/creack/pty"
@@ -76,15 +77,23 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Post("/{id}/move", s.moveTicket)
 			r.Delete("/{id}", s.deleteTicket)
 			r.Post("/{id}/subtasks", s.addSubtask)
+			r.Post("/{id}/questions", s.addQuestion)
 			r.Get("/{id}/fields", s.getTicketFields)
 			r.Put("/{id}/fields", s.setTicketFields)
 			r.Post("/{id}/dependencies", s.addDependency)
 			r.Delete("/{id}/dependencies/{blocker}", s.removeDependency)
+			r.Post("/{id}/links", s.addLink)
+			r.Delete("/{id}/links/{target}", s.removeLink)
 		})
 
 		r.Route("/subtasks", func(r chi.Router) {
 			r.Post("/{id}/toggle", s.toggleSubtask)
 			r.Delete("/{id}", s.deleteSubtask)
+		})
+
+		r.Route("/questions", func(r chi.Router) {
+			r.Put("/{id}", s.answerQuestion)
+			r.Delete("/{id}", s.deleteQuestion)
 		})
 
 		r.Route("/labels", func(r chi.Router) {
@@ -480,6 +489,55 @@ func (s *Server) removeDependency(w http.ResponseWriter, r *http.Request) {
 	s.writeTicket(w, id)
 }
 
+// addLink links the ticket in the path to target: {"target": "UE-2", "type": "duplicates"} means it duplicates UE-2.
+func (s *Server) addLink(w http.ResponseWriter, r *http.Request) {
+	var req models.AddLinkRequest
+	if err := decodeJSON(r, &req); err != nil || req.Target == "" {
+		writeError(w, http.StatusBadRequest, "target and type are required")
+		return
+	}
+	id, ok := s.resolveTicket(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	targetID, ok := s.resolveTicket(w, req.Target)
+	if !ok {
+		return
+	}
+	err := s.store.AddLink(id, targetID, req.Type)
+	if errors.Is(err, db.ErrInvalidLink) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeTicket(w, id)
+}
+
+// removeLink removes the link from the ticket in the path to the target; the type is in ?type=.
+func (s *Server) removeLink(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.resolveTicket(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	targetID, ok := s.resolveTicket(w, chi.URLParam(r, "target"))
+	if !ok {
+		return
+	}
+	err := s.store.RemoveLink(id, targetID, r.URL.Query().Get("type"))
+	if errors.Is(err, db.ErrInvalidLink) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.writeTicket(w, id)
+}
+
 func (s *Server) addSubtask(w http.ResponseWriter, r *http.Request) {
 	var req models.CreateSubtaskRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -509,6 +567,50 @@ func (s *Server) toggleSubtask(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteSubtask(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteSubtask(chi.URLParam(r, "id")); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) addQuestion(w http.ResponseWriter, r *http.Request) {
+	var req models.CreateQuestionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if strings.TrimSpace(req.Text) == "" {
+		writeError(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	q, err := s.store.AddQuestion(chi.URLParam(r, "id"), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, q)
+}
+
+func (s *Server) answerQuestion(w http.ResponseWriter, r *http.Request) {
+	var req models.AnswerQuestionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	q, err := s.store.AnswerQuestion(chi.URLParam(r, "id"), req.Answer)
+	if errors.Is(err, db.ErrQuestionNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, q)
+}
+
+func (s *Server) deleteQuestion(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteQuestion(chi.URLParam(r, "id")); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

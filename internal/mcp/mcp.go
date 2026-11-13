@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
@@ -197,7 +198,7 @@ func (s *MCPServer) resolve(r ticketRef) (string, error) {
 	return "", fmt.Errorf("ticket id or key is required")
 }
 
-// ticketAck — короткий ответ инструментов записи: ключ, заголовок, статус, имена тегов, поля, блокеры и счётчики подзадач.
+// ticketAck — короткий ответ инструментов записи: ключ, заголовок, статус, имена тегов, поля, блокеры, связи и счётчики подзадач.
 type ticketAck struct {
 	Key             string            `json:"key"`
 	Title           string            `json:"title"`
@@ -206,11 +207,14 @@ type ticketAck struct {
 	Fields          map[string]string `json:"fields,omitempty"`
 	BlockedByKeys   []string          `json:"blockedByKeys,omitempty"`
 	OpenBlockerKeys []string          `json:"openBlockerKeys,omitempty"`
+	Links           []models.LinkRef  `json:"links,omitempty"`
 	SubtasksDone    int               `json:"subtasksDone,omitempty"`
 	SubtasksTotal   int               `json:"subtasksTotal,omitempty"`
+	QuestionsOpen   int               `json:"questionsOpen,omitempty"`
+	QuestionsTotal  int               `json:"questionsTotal,omitempty"`
 }
 
-const ackNote = "Returns a short acknowledgement: key, title, status, tag names, fields, blockedByKeys, openBlockerKeys and subtask counts (use get_ticket for the description)."
+const ackNote = "Returns a short acknowledgement: key, title, status, tag names, fields, blockedByKeys, openBlockerKeys, links, subtask counts and question counts (questionsOpen/questionsTotal) (use get_ticket for the description)."
 
 func (s *MCPServer) ack(id string) (any, error) {
 	t, err := s.store.GetTicketCompact(id)
@@ -227,8 +231,11 @@ func (s *MCPServer) ack(id string) (any, error) {
 		Fields:          t.Fields,
 		BlockedByKeys:   t.BlockedByKeys,
 		OpenBlockerKeys: t.OpenBlockerKeys,
+		Links:           t.Links,
 		SubtasksDone:    t.SubtasksDone,
 		SubtasksTotal:   t.SubtasksTotal,
+		QuestionsOpen:   t.QuestionsOpen,
+		QuestionsTotal:  t.QuestionsTotal,
 	}
 	for _, l := range t.Labels {
 		a.Labels = append(a.Labels, l.Name)
@@ -463,6 +470,31 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		}
 		return s.ack(id)
 
+	case "add_link", "remove_link":
+		var a struct {
+			ticketRef
+			Target string `json:"target"`
+			Type   string `json:"type"`
+		}
+		json.Unmarshal(args, &a)
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		targetID, err := s.store.ResolveTicketID(a.Target)
+		if err != nil {
+			return nil, err
+		}
+		if name == "add_link" {
+			err = s.store.AddLink(id, targetID, a.Type)
+		} else {
+			err = s.store.RemoveLink(id, targetID, a.Type)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return s.ack(id)
+
 	case "get_board":
 		var a models.TicketFilter
 		json.Unmarshal(args, &a)
@@ -563,6 +595,69 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		}
 		json.Unmarshal(args, &a)
 		return s.store.ToggleSubtask(a.ID)
+
+	case "add_question":
+		var a struct {
+			ticketRef
+			Text string `json:"text"`
+		}
+		json.Unmarshal(args, &a)
+		if strings.TrimSpace(a.Text) == "" {
+			return nil, fmt.Errorf("ticketId (or key) and text are required")
+		}
+		id, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		return s.store.AddQuestion(id, models.CreateQuestionRequest{Text: a.Text})
+
+	case "batch_add_questions":
+		var a struct {
+			ticketRef
+			Questions []string `json:"questions"`
+		}
+		json.Unmarshal(args, &a)
+		if len(a.Questions) == 0 {
+			return nil, fmt.Errorf("ticketId (or key) and at least one question are required")
+		}
+		ticketID, err := s.resolve(a.ticketRef)
+		if err != nil {
+			return nil, err
+		}
+		type createdQuestion struct {
+			ID   string `json:"id"`
+			Text string `json:"text"`
+		}
+		var created []createdQuestion
+		for _, text := range a.Questions {
+			if strings.TrimSpace(text) == "" {
+				continue
+			}
+			q, err := s.store.AddQuestion(ticketID, models.CreateQuestionRequest{Text: text})
+			if err != nil {
+				return nil, fmt.Errorf("adding question %q: %w", text, err)
+			}
+			created = append(created, createdQuestion{ID: q.ID, Text: q.Text})
+		}
+		return created, nil
+
+	case "answer_question":
+		var a struct {
+			ID     string `json:"id"`
+			Answer string `json:"answer"`
+		}
+		json.Unmarshal(args, &a)
+		if a.ID == "" {
+			return nil, fmt.Errorf("id is required")
+		}
+		return s.store.AnswerQuestion(a.ID, a.Answer)
+
+	case "delete_question":
+		var a struct {
+			ID string `json:"id"`
+		}
+		json.Unmarshal(args, &a)
+		return map[string]bool{"deleted": true}, s.store.DeleteQuestion(a.ID)
 
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
@@ -730,8 +825,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		{
 			Name: "list_tickets",
 			Description: "List tickets with optional filters by project, team, status, priority, tag, text search, custom field and readiness. " +
-				"Each ticket shows blockedBy (IDs), blockedByKeys (e.g. \"UE-80\"), openBlockers (count of blockers not yet done) and openBlockerKeys. " +
-				"Use compact=true to save tokens: no description, subtasks only as subtasksDone/subtasksTotal.",
+				"Each ticket shows blockedBy (IDs), blockedByKeys (e.g. \"UE-80\"), openBlockers (count of blockers not closed, i.e. neither done nor cancelled) and openBlockerKeys. " +
+				"Each ticket also shows links (compact: key and type; for duplicates direction \"out\" = this ticket duplicates the key, \"in\" = the key duplicates this ticket). " +
+				"Use compact=true to save tokens: no description, subtasks and questions only as counts (subtasksDone/subtasksTotal, questionsOpen/questionsTotal).",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -742,18 +838,18 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"label":     {Type: "string", Description: "Filter by tag name or ID"},
 					"search":    {Type: "string", Description: "Case-insensitive substring over key, title and description"},
 					"field":     {Type: "string", Description: "Custom field filter: \"name=value\" (value compared case-insensitively) or \"name\" (field is present)"},
-					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all done (or that have none)"},
-					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
+					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all closed (done or cancelled), or that have none"},
+					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks and questions only as counts (default false)"},
 				},
 			},
 		},
 		{
 			Name:        "get_ticket",
-			Description: "Get detailed ticket information including subtasks, labels, custom fields and dependencies. Accepts the ticket ID or its key (e.g. UE-71).",
+			Description: "Get detailed ticket information including subtasks, questions with answers, labels, custom fields, dependencies and links.Accepts the ticket ID or its key (e.g. UE-71).",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: ticketProps(map[string]schemaProp{
-					"compact": {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
+					"compact": {Type: "boolean", Description: "If true, omit description and return subtasks and questions only as counts (default false)"},
 				}),
 			},
 		},
@@ -764,7 +860,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Type: "object",
 				Properties: map[string]schemaProp{
 					"keys":    {Type: "array", Description: "Ticket keys such as UE-71 (case-insensitive) or ticket IDs", Items: &jsonSchema{Type: "string"}},
-					"compact": {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
+					"compact": {Type: "boolean", Description: "If true, omit description and return subtasks and questions only as counts (default false)"},
 				},
 				Required: []string{"keys"},
 			},
@@ -874,11 +970,38 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Required: []string{"blockedBy"},
 			},
 		},
+		{
+			Name: "add_link",
+			Description: "Link a ticket to another one. type relates_to is symmetric (A relates to B is the same as B relates to A). " +
+				"type duplicates is directed: the ticket given by id/key duplicates the target, so the target shows \"duplicated by\" and the ticket shows \"duplicate of\". " +
+				"Both are given by ID or key (e.g. UE-80). A ticket cannot link to itself; adding an existing link does nothing. " + ackNote,
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"target": {Type: "string", Description: "ID or key of the other ticket"},
+					"type":   {Type: "string", Description: "Link type: relates_to or duplicates", Enum: models.LinkTypes},
+				}),
+				Required: []string{"target", "type"},
+			},
+		},
+		{
+			Name: "remove_link",
+			Description: "Remove a link between two tickets of the given type. For duplicates the ticket given by id/key must be the duplicate and the target the original, as in add_link. " +
+				"Both are given by ID or key. " + ackNote,
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"target": {Type: "string", Description: "ID or key of the other ticket"},
+					"type":   {Type: "string", Description: "Link type: relates_to or duplicates", Enum: models.LinkTypes},
+				}),
+				Required: []string{"target", "type"},
+			},
+		},
 		// --- Board ---
 		{
 			Name: "get_board",
-			Description: "Get full Kanban board grouped by status columns (todo, in_progress, ready_for_review, done). " +
-				"Use compact=true to save tokens: no description, subtasks only as subtasksDone/subtasksTotal.",
+			Description: "Get full Kanban board grouped by status columns (triage, backlog, todo, in_progress, ready_for_review, done, cancelled)." +
+				"Use compact=true to save tokens: no description, subtasks and questions only as counts (subtasksDone/subtasksTotal, questionsOpen/questionsTotal).",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -886,8 +1009,8 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"label":     {Type: "string", Description: "Show only tickets with this tag name or ID (optional)"},
 					"search":    {Type: "string", Description: "Case-insensitive substring over key, title and description (optional)"},
 					"field":     {Type: "string", Description: "Custom field filter: \"name=value\" or \"name\" (optional)"},
-					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all done (default false)"},
-					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks only as counts (default false)"},
+					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all closed (done or cancelled) (default false)"},
+					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks and questions only as counts (default false)"},
 				},
 			},
 		},
@@ -939,6 +1062,52 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 			InputSchema: jsonSchema{
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Subtask ID"}},
+				Required:   []string{"id"},
+			},
+		},
+		// --- Questions (for the user to answer in the web UI) ---
+		{
+			Name:        "add_question",
+			Description: "Add a question for the user to a ticket; the user answers it in the web UI and get_ticket then returns the answer.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"ticketId": {Type: "string", Description: "Ticket ID or key (alternative to id / key)"},
+					"text":     {Type: "string", Description: "Question text"},
+				}),
+				Required: []string{"text"},
+			},
+		},
+		{
+			Name:        "batch_add_questions",
+			Description: "Add several questions for the user to a ticket at once; more efficient than calling add_question repeatedly.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: ticketProps(map[string]schemaProp{
+					"ticketId":  {Type: "string", Description: "Ticket ID or key (alternative to id / key)"},
+					"questions": {Type: "array", Description: "Question texts", Items: &jsonSchema{Type: "string"}},
+				}),
+				Required: []string{"questions"},
+			},
+		},
+		{
+			Name:        "answer_question",
+			Description: "Set or replace the answer of a question; an empty answer marks it unanswered again.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"id":     {Type: "string", Description: "Question ID"},
+					"answer": {Type: "string", Description: "Answer text"},
+				},
+				Required: []string{"id", "answer"},
+			},
+		},
+		{
+			Name:        "delete_question",
+			Description: "Delete a question from a ticket.",
+			InputSchema: jsonSchema{
+				Type:       "object",
+				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Question ID"}},
 				Required:   []string{"id"},
 			},
 		},

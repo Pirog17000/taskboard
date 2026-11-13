@@ -26,9 +26,11 @@ func NewStore(database *sql.DB) *Store {
 func (s *Store) ClearData() error {
 	tables := []string{
 		"ticket_dependencies",
+		"ticket_links",
 		"ticket_fields",
 		"ticket_labels",
 		"subtasks",
+		"questions",
 		"tickets",
 		"labels",
 		"teams",

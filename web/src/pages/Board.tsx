@@ -25,12 +25,14 @@ import {
   Plus,
   Lock,
   Search,
+  HelpCircle,
 } from "lucide-react";
 import { api, type Ticket, type TicketInput, type Project, type Team, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS } from "../lib/statuses";
 import { allTags, tagNames } from "../lib/tags";
+import { duplicateOfKeys } from "../lib/links";
 import { CARD_FIELDS, FIELD_FILTER_LABELS, fieldValues, matchesSearch } from "../lib/fields";
 
 const STORAGE_PROJECT = "taskboard.board.project";
@@ -92,6 +94,17 @@ function SubtaskProgress({ subtasks }: { subtasks: Ticket["subtasks"] }) {
   );
 }
 
+function QuestionCounter({ questions }: { questions: Ticket["questions"] }) {
+  const open = (questions || []).filter((q) => !q.answer.trim()).length;
+  if (open === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 text-xs text-amber-400">
+      <HelpCircle className="w-3 h-3" />
+      Вопросов без ответа: {open}
+    </div>
+  );
+}
+
 function TicketCard({
   ticket,
   projects,
@@ -122,6 +135,14 @@ function TicketCard({
         <PriorityBadge priority={ticket.priority} />
       </div>
       <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
+      {duplicateOfKeys(ticket).map((key) => (
+        <span
+          key={key}
+          className="inline-flex items-center rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-400"
+        >
+          duplicate of {key}
+        </span>
+      ))}
       {(ticket.openBlockers ?? 0) > 0 && (
         <span
           className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-400"
@@ -179,6 +200,7 @@ function TicketCard({
         </div>
       )}
       <SubtaskProgress subtasks={ticket.subtasks} />
+      <QuestionCounter questions={ticket.questions} />
     </div>
   );
 }

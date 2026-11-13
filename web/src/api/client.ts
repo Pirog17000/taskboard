@@ -31,6 +31,23 @@ export interface Subtask {
   position: number;
 }
 
+export interface Question {
+  id: string;
+  ticketId: string;
+  position: number;
+  text: string;
+  answer: string;
+  createdAt: string;
+  answeredAt?: string;
+}
+
+// A link seen from one ticket. direction is set only for duplicates: "out" = this ticket duplicates key, "in" = key duplicates this ticket.
+export interface TicketLink {
+  type: string;
+  direction?: "out" | "in";
+  key: string;
+}
+
 export interface Ticket {
   id: string;
   projectId: string;
@@ -47,11 +64,13 @@ export interface Ticket {
   projectPrefix: string;
   labels: Label[];
   subtasks: Subtask[];
+  questions?: Question[];
   blockedBy: string[];
   blockedByKeys?: string[];
   openBlockers?: number;
   openBlockerKeys?: string[];
   fields?: Record<string, string>;
+  links?: TicketLink[];
 }
 
 // Данные для создания/изменения тикета. labels — имена тегов (новые создаются автоматически).
@@ -149,11 +168,36 @@ export const api = {
       request<Ticket>(`/api/tickets/${id}/dependencies/${encodeURIComponent(blockedBy)}`, {
         method: "DELETE",
       }),
+    // type "relates_to" or "duplicates"; the ticket with this id is the source (it duplicates target).
+    addLink: (id: string, target: string, type: string) =>
+      request<Ticket>(`/api/tickets/${id}/links`, {
+        method: "POST",
+        body: JSON.stringify({ target, type }),
+      }),
+    removeLink: (id: string, target: string, type: string) =>
+      request<Ticket>(`/api/tickets/${id}/links/${encodeURIComponent(target)}?type=${encodeURIComponent(type)}`, {
+        method: "DELETE",
+      }),
+    addQuestion: (id: string, text: string) =>
+      request<Question>(`/api/tickets/${id}/questions`, {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      }),
     addSubtask: (id: string, title: string) =>
       request<Subtask>(`/api/tickets/${id}/subtasks`, {
         method: "POST",
         body: JSON.stringify({ title }),
       }),
+  },
+
+  questions: {
+    answer: (id: string, answer: string) =>
+      request<Question>(`/api/questions/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ answer }),
+      }),
+    delete: (id: string) =>
+      request<void>(`/api/questions/${id}`, { method: "DELETE" }),
   },
 
   subtasks: {

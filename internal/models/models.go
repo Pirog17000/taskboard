@@ -1,18 +1,33 @@
 package models
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // TicketStatuses — статусы тикетов в порядке колонок на доске.
-var TicketStatuses = []string{"todo", "in_progress", "ready_for_review", "done"}
+var TicketStatuses = []string{"triage", "backlog", "todo", "in_progress", "ready_for_review", "done", "cancelled"}
+
+// ClosedTicketStatuses — статусы закрытого тикета: он не блокирует зависимые тикеты.
+var ClosedTicketStatuses = []string{"done", "cancelled"}
 
 // IsValidTicketStatus сообщает, является ли s допустимым статусом тикета.
 func IsValidTicketStatus(s string) bool {
-	for _, v := range TicketStatuses {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(TicketStatuses, s)
+}
+
+// IsClosedTicketStatus сообщает, закрыт ли тикет с таким статусом (done или cancelled).
+func IsClosedTicketStatus(s string) bool {
+	return slices.Contains(ClosedTicketStatuses, s)
+}
+
+// LinkTypes — допустимые типы связей между тикетами.
+// relates_to is symmetric; duplicates is directed: A duplicates B.
+var LinkTypes = []string{"relates_to", "duplicates"}
+
+// IsValidLinkType сообщает, является ли t допустимым типом связи между тикетами.
+func IsValidLinkType(t string) bool {
+	return slices.Contains(LinkTypes, t)
 }
 
 type Project struct {
@@ -49,10 +64,11 @@ type Ticket struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 
 	// Populated fields (not stored directly)
-	ProjectPrefix string    `json:"projectPrefix,omitempty"`
-	Labels        []Label   `json:"labels,omitempty"`
-	Subtasks      []Subtask `json:"subtasks,omitempty"`
-	BlockedBy     []string  `json:"blockedBy,omitempty"`
+	ProjectPrefix string     `json:"projectPrefix,omitempty"`
+	Labels        []Label    `json:"labels,omitempty"`
+	Subtasks      []Subtask  `json:"subtasks,omitempty"`
+	Questions     []Question `json:"questions,omitempty"`
+	BlockedBy     []string   `json:"blockedBy,omitempty"`
 
 	Fields          map[string]string `json:"fields,omitempty"`
 	BlockedByKeys   []string          `json:"blockedByKeys,omitempty"`
@@ -60,6 +76,17 @@ type Ticket struct {
 	OpenBlockerKeys []string          `json:"openBlockerKeys,omitempty"`
 	SubtasksDone    int               `json:"subtasksDone,omitempty"`
 	SubtasksTotal   int               `json:"subtasksTotal,omitempty"`
+	QuestionsOpen   int               `json:"questionsOpen,omitempty"`
+	QuestionsTotal  int               `json:"questionsTotal,omitempty"`
+	Links           []LinkRef         `json:"links,omitempty"`
+}
+
+// LinkRef is a link seen from one ticket: the other ticket's key and the link type.
+// Direction is set only for duplicates: "out" = this ticket duplicates Key, "in" = Key duplicates this ticket.
+type LinkRef struct {
+	Type      string `json:"type"`
+	Direction string `json:"direction,omitempty"`
+	Key       string `json:"key"`
 }
 
 // DisplayKey returns the human-readable ticket key like "AUTH-1"
@@ -102,6 +129,17 @@ type Subtask struct {
 	Title     string `json:"title"`
 	Completed bool   `json:"completed"`
 	Position  int    `json:"position"`
+}
+
+// Question is a question on a ticket; an empty Answer means it is still unanswered.
+type Question struct {
+	ID         string     `json:"id"`
+	TicketID   string     `json:"ticketId"`
+	Position   int        `json:"position"`
+	Text       string     `json:"text"`
+	Answer     string     `json:"answer"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	AnsweredAt *time.Time `json:"answeredAt,omitempty"`
 }
 
 type TicketDependency struct {
@@ -180,6 +218,14 @@ type CreateSubtaskRequest struct {
 	Title string `json:"title"`
 }
 
+type CreateQuestionRequest struct {
+	Text string `json:"text"`
+}
+
+type AnswerQuestionRequest struct {
+	Answer string `json:"answer"`
+}
+
 type CreateLabelRequest struct {
 	Name  string `json:"name"`
 	Color string `json:"color"`
@@ -198,10 +244,15 @@ type TicketFilter struct {
 	Label     string // ID или имя тега
 	Search    string // подстрока в ключе, заголовке или описании, без учёта регистра
 	Field     string // "имя=значение" или "имя" (поле задано)
-	Unblocked bool   // только тикеты, у которых все блокирующие тикеты в статусе done
+	Unblocked bool   // только тикеты, у которых все блокирующие тикеты закрыты (done или cancelled)
 	Compact   bool   // без описания, подзадачи только счётчиками
 }
 
 type AddDependencyRequest struct {
 	BlockedBy string `json:"blockedBy"` // ID или ключ блокирующего тикета
+}
+
+type AddLinkRequest struct {
+	Target string `json:"target"` // ID или ключ второго тикета
+	Type   string `json:"type"`   // relates_to или duplicates
 }

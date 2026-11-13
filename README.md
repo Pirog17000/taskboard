@@ -12,13 +12,13 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 
 ## Features
 
-- **Kanban Board** — drag-and-drop ticket management across Todo, In Progress, Ready for Review, and Done columns
+- **Kanban Board** — drag-and-drop ticket management across Needs decision, Backlog, Todo, In Progress, Ready for Review, Done, and Cancelled columns
 - **Projects** — organize work with customizable projects (icons, colors, prefixes)
 - **Teams** — assign tickets to teams
-- **Tickets** — priority levels, due dates, tags (labels) for grouping into sections such as waves or plan stages, subtasks, dependencies (blocked by)
+- **Tickets** — priority levels, due dates, tags (labels) for grouping into sections such as waves or plan stages, subtasks, dependencies (blocked by), links (relates to, duplicates)
 - **Embedded Terminal** — run AI coding agents (opencode, Claude Code) directly from the web UI (macOS and Linux only)
 - **CLI** — manage everything from the terminal
-- **MCP Server** — 30 tools for AI-native project management via Model Context Protocol
+- **MCP Server** — 32 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
 - **Single Binary** — `brew install` on macOS/Linux, or build one `taskboard.exe` on Windows
 - **Cross-platform** — macOS, Linux, and Windows
@@ -129,7 +129,17 @@ Project → Ticket → Subtask
 - **Tickets** are concrete, actionable tasks within a project. Don't create "epic" tickets — use projects.
 - **Subtasks** are checklist steps within a ticket, for breaking work into verifiable pieces.
 
-#### Available MCP Tools (30)
+#### Questions
+
+A ticket has a **Вопросы** (Questions) section under the description: a list of questions, each with a text and an answer field. Agents add questions with `add_question` / `batch_add_questions`; the user answers in the web UI (the answer saves when the field loses focus), and questions can also be added or deleted by hand. Unanswered questions are highlighted in the ticket view and counted on the board card. Agents read the answers with `get_ticket` (`questions`: `id`, `text`, `answer`, `createdAt`, `answeredAt`); `compact` outputs and `list_tickets` report `questionsTotal` / `questionsOpen` (omitted when zero) instead. `answer_question` lets an agent record an answer on the user's behalf; an empty answer marks the question unanswered again. Stored in the `questions` table (migration `005_ticket_questions.sql`, additive).
+
+#### Statuses and Links
+
+Ticket statuses, in column order: `triage` (shown as "Needs decision": needs a discussion or decision before it can be planned), `backlog`, `todo`, `in_progress`, `ready_for_review`, `done`, `cancelled`. A ticket in `done` or `cancelled` is closed: a closed blocker no longer blocks the tickets it blocks.
+
+Links connect two tickets with a type. `relates_to` is symmetric and stored once per pair. `duplicates` is directed: marking ticket A as a duplicate of B is `add_link(A, B, duplicates)`; A then shows "duplicate of B" (badge on the card and in the ticket panel) and B shows "duplicated by A". Each link exists once per (from, to, type); deleting a ticket removes its links. The existing `blockedBy` dependencies are separate and unchanged.
+
+#### Available MCP Tools (32)
 
 | Tool                    | Description                                      |
 | ----------------------- | ------------------------------------------------ |
@@ -146,7 +156,7 @@ Project → Ticket → Subtask
 | `update_team`           | Update team properties                           |
 | `delete_team`           | Delete a team                                    |
 | **Tickets**             |                                                  |
-| `list_tickets`          | List tickets with filters: project (ID or prefix), team, status, priority, tag, `search` (substring over key/title/description), `field` (`name=value` or `name`), `unblocked` (all blockers done), `compact` |
+| `list_tickets`          | List tickets with filters: project (ID or prefix), team, status, priority, tag, `search` (substring over key/title/description), `field` (`name=value` or `name`), `unblocked` (all blockers closed: done or cancelled), `compact` |
 | `get_ticket`            | Get ticket details by ID or key (`UE-71`); `compact` omits description and returns subtask counts |
 | `get_tickets`           | Get several tickets by `keys` in the given order (optional `compact`) |
 | `create_ticket`         | Create a ticket (task) within a project          |
@@ -157,6 +167,8 @@ Project → Ticket → Subtask
 | `set_ticket_fields`     | Set custom key/value fields (e.g. `class`, `stage`); an empty value deletes the field |
 | `add_dependency`        | Block a ticket by another one (self-dependencies and cycles are rejected) |
 | `remove_dependency`     | Remove a dependency                              |
+| `add_link`              | Link a ticket to another one: `type` `relates_to` (symmetric) or `duplicates` (the ticket is a duplicate of `target`); self-links are rejected |
+| `remove_link`           | Remove a link of the given `type` (for `duplicates`, the ticket is the duplicate) |
 | **Labels (tags)**       |                                                  |
 | `list_labels`           | List all tags                                    |
 | `create_label`          | Create a tag (returns the existing one if the name exists) |
@@ -169,14 +181,19 @@ Project → Ticket → Subtask
 | `batch_create_subtasks` | Add multiple subtasks to a ticket at once        |
 | `toggle_subtask`        | Toggle subtask completion                        |
 | `delete_subtask`        | Remove a subtask from a ticket                   |
+| **Questions**           |                                                  |
+| `add_question`          | Add a question for the user to a ticket          |
+| `batch_add_questions`   | Add several questions to a ticket at once        |
+| `answer_question`       | Set or replace the answer of a question          |
+| `delete_question`       | Remove a question from a ticket                  |
 
-Every tool that takes a ticket `id` (or `ticketId`) also accepts a `key` such as `UE-71` (project prefix + number, case-insensitive). Tickets show `blockedBy` (IDs), `blockedByKeys`, `openBlockers` (blockers not yet `done`), `openBlockerKeys` and custom `fields`. `compact: true` drops the description and returns subtasks only as `subtasksDone` / `subtasksTotal` (omitted when zero).
+Every tool that takes a ticket `id` (or `ticketId`) also accepts a `key` such as `UE-71` (project prefix + number, case-insensitive). Tickets show `blockedBy` (IDs), `blockedByKeys`, `openBlockers` (blockers not closed: neither `done` nor `cancelled`), `links` (compact: key and type; `direction` `out`/`in` for duplicates), `openBlockerKeys` and custom `fields`. `compact: true` drops the description and returns subtasks only as `subtasksDone` / `subtasksTotal` (omitted when zero).
 
-Write tools (`create_ticket`, `update_ticket`, `move_ticket`, `append_to_ticket`, `set_ticket_fields`, `add_dependency`, `remove_dependency`, `add_label`, `remove_label`) return a short acknowledgement instead of the whole ticket: `key`, `title`, `status`, tag names, `fields`, `blockedByKeys`, `openBlockerKeys` and subtask counts; use `get_ticket` for the description. `batch_create_subtasks` returns only `id` and `title` of each new subtask. All MCP results are compact JSON (no indentation).
+Write tools (`create_ticket`, `update_ticket`, `move_ticket`, `append_to_ticket`, `set_ticket_fields`, `add_dependency`, `remove_dependency`, `add_link`, `remove_link`, `add_label`, `remove_label`) return a short acknowledgement instead of the whole ticket: `key`, `title`, `status`, tag names, `fields`, `blockedByKeys`, `openBlockerKeys` and subtask counts; use `get_ticket` for the description. `batch_create_subtasks` returns only `id` and `title` of each new subtask. All MCP results are compact JSON (no indentation).
 
 Before applying a pending database migration, taskboard writes a backup next to the database: `backups/pre-<migration>-<timestamp>.db`. If the backup fails, no migration runs.
 
-The web UI remembers the last opened project and tag filter, shows `class` / `stage` fields and a «заблокирован» badge on cards, and has board search plus quick filters by those fields. The left sidebar collapses to an icon rail (the button next to the logo); the state is remembered.
+The web UI remembers the last opened project and tag filter, shows `class` / `stage` fields, a «заблокирован» badge and a «duplicate of KEY» badge on cards, and has board search plus quick filters by those fields. The left sidebar collapses to an icon rail (the button next to the logo); the state is remembered.
 
 #### Example Prompts
 
