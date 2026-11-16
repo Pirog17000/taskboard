@@ -71,6 +71,14 @@ export interface Ticket {
   openBlockerKeys?: string[];
   fields?: Record<string, string>;
   links?: TicketLink[];
+  // Live progress card (kind === "live"), made by scripts through upsert_live_card
+  kind?: string;
+  liveId?: string;
+  progress?: number;
+  progressText?: string;
+  liveState?: "running" | "ok" | "failed";
+  liveLines?: string[];
+  expiresAt?: string;
 }
 
 // Данные для создания/изменения тикета. labels — имена тегов (новые создаются автоматически).

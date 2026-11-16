@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -8,11 +8,19 @@ import {
   useDroppable,
   useDraggable,
   closestCorners,
+  type CollisionDetection,
   type DragStartEvent,
   type DragEndEvent,
   type DragOverEvent,
   type UniqueIdentifier,
 } from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Calendar,
   AlertTriangle,
@@ -20,12 +28,18 @@ import {
   ArrowRight,
   ArrowDown,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   FolderKanban,
   Users,
   Plus,
   Lock,
   Search,
   HelpCircle,
+  Activity,
+  SlidersHorizontal,
+  ListChecks,
+  MoreHorizontal,
 } from "lucide-react";
 import { api, type Ticket, type TicketInput, type Project, type Team, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
@@ -33,10 +47,112 @@ import CreateTicketModal from "../components/CreateTicketModal";
 import { STATUSES, STATUS_LABELS, STATUS_COLORS } from "../lib/statuses";
 import { allTags, tagNames } from "../lib/tags";
 import { duplicateOfKeys } from "../lib/links";
-import { CARD_FIELDS, FIELD_FILTER_LABELS, fieldValues, matchesSearch } from "../lib/fields";
+import { CARD_FIELDS, fieldValues, matchesSearch } from "../lib/fields";
+import {
+  DEFAULT_DISPLAY,
+  DEFAULT_SORT,
+  EMPTY_FILTERS,
+  SORT_LABELS,
+  activeFilterCount,
+  boardFieldNames,
+  cardFieldEntries,
+  matchesFilters,
+  sortTickets,
+  type CardDisplay,
+  type SortKey,
+  type ViewFilters,
+  type ViewSort,
+} from "../lib/boardView";
+import ViewMenu, { Row, SELECT_CLASS } from "../components/ViewMenu";
+import BulkMenu from "../components/BulkMenu";
 
 const STORAGE_PROJECT = "taskboard.board.project";
 const STORAGE_TAG = "taskboard.board.tag";
+const STORAGE_SORT = "taskboard.board.sort";
+const STORAGE_DISPLAY = "taskboard.board.display";
+const STORAGE_COLUMN_ORDER = "taskboard.columnOrder";
+const STORAGE_COLLAPSED = "taskboard.collapsedColumns";
+const COLUMN_ID_PREFIX = "column:";
+
+// Второстепенные кнопки шапки: одна высота с полями ввода, на узком экране — только иконка
+const HEADER_BUTTON =
+  "inline-flex h-8 min-w-8 items-center justify-center gap-1.5 bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2 hover:border-slate-500 hover:text-slate-100 transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500";
+
+// Подписи быстрых фильтров по полям внутри меню фильтров
+const FIELD_ROW_LABELS: Record<string, string> = { class: "Класс", stage: "Стадия" };
+
+interface MoreMenuItem {
+  icon: typeof Plus;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}
+
+// Меню «⋯» для редких действий шапки. Закрывается по клику вне, по Esc и после выбора пункта.
+function MoreMenu({ items }: { items: MoreMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="Другие действия"
+        aria-label="Другие действия"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={`${HEADER_BUTTON} ${open ? "border-blue-500/60 text-blue-300" : ""}`}
+      >
+        <MoreHorizontal className="w-4 h-4" />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 z-40 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-slate-700 bg-slate-900 p-1 shadow-xl"
+        >
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+              className="flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-slate-800 transition-colors"
+            >
+              <item.icon className="mt-0.5 w-4 h-4 shrink-0 text-slate-400" />
+              <span className="min-w-0">
+                <span className="block text-sm text-slate-200">{item.label}</span>
+                <span className="block text-xs text-slate-500">{item.hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Column drags and ticket drags share one DndContext; this tells them apart by data.current.type
+const COLUMN_DRAG = "column";
 
 function readStored(key: string): string {
   try {
@@ -54,6 +170,87 @@ function writeStored(key: string, value: string) {
     // localStorage недоступен: просто не запоминаем
   }
 }
+
+function readList(key: string): string[] {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || "[]");
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeList(key: string, list: string[]) {
+  try {
+    localStorage.setItem(key, JSON.stringify(list));
+  } catch {
+    // localStorage недоступен: просто не запоминаем
+  }
+}
+
+function writeJson(key: string, value: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // localStorage недоступен: просто не запоминаем
+  }
+}
+
+function readJsonObject(key: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) || "null");
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+const SORT_KEYS = Object.keys(SORT_LABELS) as SortKey[];
+
+// Сортировка из localStorage: неизвестный ключ сбрасывается на значение по умолчанию
+function readSort(): ViewSort {
+  const saved = readJsonObject(STORAGE_SORT);
+  if (!saved) return DEFAULT_SORT;
+  const key = SORT_KEYS.includes(saved.key as SortKey) ? (saved.key as SortKey) : DEFAULT_SORT.key;
+  return { key, desc: saved.desc === true };
+}
+
+// Настройки карточки из localStorage: только булевы значения
+function readDisplay(): CardDisplay {
+  const saved = readJsonObject(STORAGE_DISPLAY);
+  if (!saved) return DEFAULT_DISPLAY;
+  const fields: Record<string, boolean> = {};
+  const savedFields = saved.fields;
+  if (savedFields && typeof savedFields === "object" && !Array.isArray(savedFields)) {
+    for (const [name, shown] of Object.entries(savedFields as Record<string, unknown>)) {
+      if (typeof shown === "boolean") fields[name] = shown;
+    }
+  }
+  return {
+    showTags: typeof saved.showTags === "boolean" ? saved.showTags : DEFAULT_DISPLAY.showTags,
+    fields,
+  };
+}
+
+// Saved order first (unknown and repeated ids dropped), then the columns it does not mention in default order
+function normalizeColumnOrder(saved: string[]): string[] {
+  const known = saved.filter((status, i) => STATUSES.includes(status) && saved.indexOf(status) === i);
+  return [...known, ...STATUSES.filter((status) => !known.includes(status))];
+}
+
+const columnId = (status: string) => `${COLUMN_ID_PREFIX}${status}`;
+const statusOfColumnId = (id: UniqueIdentifier) => String(id).slice(COLUMN_ID_PREFIX.length);
+
+// Column drags only collide with columns; ticket drags only with drop zones and never with columns
+const collisionByDragKind: CollisionDetection = (args) => {
+  const draggingColumn = args.active.data.current?.type === COLUMN_DRAG;
+  return closestCorners({
+    ...args,
+    droppableContainers: args.droppableContainers.filter(
+      (container) => (container.data.current?.type === COLUMN_DRAG) === draggingColumn
+    ),
+  });
+};
 
 const PRIORITY_CONFIG: Record<string, { color: string; icon: typeof ArrowUp }> = {
   urgent: { color: "text-red-500", icon: AlertTriangle },
@@ -105,26 +302,93 @@ function QuestionCounter({ questions }: { questions: Ticket["questions"] }) {
   );
 }
 
+const LIVE_STYLES: Record<string, { box: string; chip: string; bar: string; text: string; label: string }> = {
+  running: {
+    box: "border-blue-500/60 bg-blue-950/40",
+    chip: "bg-blue-500/20 text-blue-300",
+    bar: "bg-blue-500",
+    text: "text-blue-300",
+    label: "LIVE",
+  },
+  ok: {
+    box: "border-green-500/60 bg-green-950/40",
+    chip: "bg-green-500/20 text-green-300",
+    bar: "bg-green-500",
+    text: "text-green-300",
+    label: "ГОТОВО",
+  },
+  failed: {
+    box: "border-red-500/60 bg-red-950/40",
+    chip: "bg-red-500/20 text-red-300",
+    bar: "bg-red-500",
+    text: "text-red-300",
+    label: "ОШИБКА",
+  },
+};
+
+// Live progress card: not draggable, not editable, refreshed by the board poll.
+function LiveCard({ ticket }: { ticket: Ticket }) {
+  const state = ticket.liveState && LIVE_STYLES[ticket.liveState] ? ticket.liveState : "running";
+  const st = LIVE_STYLES[state];
+  const pct = Math.min(100, Math.max(0, ticket.progress ?? 0));
+  return (
+    <div className={`rounded-lg border-2 p-3 space-y-2 ${st.box}`}>
+      <div className="flex items-center gap-2">
+        <span
+          className={`inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${st.chip} ${
+            state === "running" ? "animate-pulse" : ""
+          }`}
+        >
+          <Activity className="w-3 h-3" />
+          {st.label}
+        </span>
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-100" title={ticket.title}>
+          {ticket.title}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-3 rounded-full bg-slate-800 overflow-hidden">
+          <div className={`h-full rounded-full transition-all duration-500 ${st.bar}`} style={{ width: `${pct}%` }} />
+        </div>
+        <span className={`w-10 text-right text-sm font-bold tabular-nums ${st.text}`}>{pct}%</span>
+      </div>
+      {ticket.progressText && <p className="text-xs text-slate-300">{ticket.progressText}</p>}
+      {(ticket.liveLines || []).slice(0, 4).map((line, i) => (
+        <p key={i} className="truncate text-xs text-slate-400" title={line}>
+          {line}
+        </p>
+      ))}
+      <div className="text-right text-[10px] font-mono text-slate-600">
+        {ticket.projectPrefix}-{ticket.number}
+      </div>
+    </div>
+  );
+}
+
 function TicketCard({
   ticket,
   projects,
   teams,
+  display,
   isDragging,
   onClick,
 }: {
   ticket: Ticket;
   projects: Project[];
   teams: Team[];
+  display: CardDisplay;
   isDragging?: boolean;
   onClick?: () => void;
 }) {
   const project = projects.find((p) => p.id === ticket.projectId);
   const team = teams.find((t) => t.id === ticket.teamId);
+  const fieldEntries = cardFieldEntries(ticket, display);
+  const labels = ticket.labels || [];
 
   return (
     <div
       onClick={onClick}
-      className={`rounded-lg border border-slate-700/50 bg-slate-900 p-3 space-y-2 transition-colors hover:border-slate-600 cursor-pointer ${
+      className={`rounded-lg border border-slate-700/50 bg-slate-900 p-2.5 space-y-1.5 transition-colors hover:border-slate-600 cursor-pointer ${
         isDragging ? "opacity-90 shadow-xl shadow-blue-500/10 rotate-2" : ""
       }`}
     >
@@ -135,6 +399,22 @@ function TicketCard({
         <PriorityBadge priority={ticket.priority} />
       </div>
       <p className="text-sm text-slate-200 leading-snug">{ticket.title}</p>
+      {display.showTags && labels.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {labels.map((label) => (
+            <span
+              key={label.id}
+              className="inline-flex rounded px-1.5 py-0.5 text-[11px]"
+              style={{
+                backgroundColor: (label.color || "#64748b") + "1a",
+                color: label.color || "#64748b",
+              }}
+            >
+              {label.name}
+            </span>
+          ))}
+        </div>
+      )}
       {duplicateOfKeys(ticket).map((key) => (
         <span
           key={key}
@@ -152,15 +432,15 @@ function TicketCard({
           заблокирован: {(ticket.openBlockerKeys || []).join(", ")}
         </span>
       )}
-      {CARD_FIELDS.some((name) => ticket.fields?.[name]) && (
+      {fieldEntries.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {CARD_FIELDS.filter((name) => ticket.fields?.[name]).map((name) => (
+          {fieldEntries.map(([name, value]) => (
             <span
               key={name}
               title={name}
               className="inline-flex items-center rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-300"
             >
-              {ticket.fields?.[name]}
+              {(CARD_FIELDS as readonly string[]).includes(name) ? value : `${name}: ${value}`}
             </span>
           ))}
         </div>
@@ -209,11 +489,13 @@ function DraggableTicket({
   ticket,
   projects,
   teams,
+  display,
   onClick,
 }: {
   ticket: Ticket;
   projects: Project[];
   teams: Team[];
+  display: CardDisplay;
   onClick: () => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -228,7 +510,7 @@ function DraggableTicket({
       {...attributes}
       className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-30" : ""}`}
     >
-      <TicketCard ticket={ticket} projects={projects} teams={teams} onClick={onClick} />
+      <TicketCard ticket={ticket} projects={projects} teams={teams} display={display} onClick={onClick} />
     </div>
   );
 }
@@ -238,6 +520,9 @@ function Column({
   tickets,
   projects,
   teams,
+  display,
+  collapsed,
+  onToggleCollapsed,
   onTicketClick,
   onAddTicket,
 }: {
@@ -245,41 +530,123 @@ function Column({
   tickets: Ticket[];
   projects: Project[];
   teams: Team[];
+  display: CardDisplay;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onTicketClick: (ticket: Ticket) => void;
   onAddTicket: (status: string) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  // Ticket drop zone: the body when expanded, the strip when collapsed
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: status, data: { kind: "zone" } });
+  // The header (or the strip) is the only drag handle of a column
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: columnId(status), data: { type: COLUMN_DRAG } });
+  const setStripRef = useCallback(
+    (node: HTMLElement | null) => {
+      setDropRef(node);
+      setActivatorNodeRef(node);
+    },
+    [setDropRef, setActivatorNodeRef]
+  );
+  const sortStyle = { transform: CSS.Transform.toString(transform), transition };
+  const liveCount = tickets.filter((t) => t.kind === "live").length;
+
+  if (collapsed) {
+    return (
+      <div
+        ref={setSortRef}
+        style={sortStyle}
+        className={`flex flex-col w-11 shrink-0 self-stretch ${isDragging ? "opacity-40" : ""}`}
+      >
+        <div
+          ref={setStripRef}
+          {...attributes}
+          {...listeners}
+          onClick={onToggleCollapsed}
+          title={`Развернуть колонку «${STATUS_LABELS[status]}»`}
+          className={`flex flex-1 flex-col items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 py-3 cursor-pointer transition-colors hover:border-slate-600 ${
+            isOver ? "bg-blue-500/5 ring-1 ring-blue-500/20" : ""
+          }`}
+        >
+          <div className={`w-2 h-2 shrink-0 rounded-full ${STATUS_COLORS[status]}`} />
+          <span className="text-sm font-medium text-slate-300 whitespace-nowrap [writing-mode:vertical-rl]">
+            {STATUS_LABELS[status]}
+          </span>
+          <span className="text-xs text-slate-600 tabular-nums">{tickets.length}</span>
+          <button type="button" aria-label="Развернуть колонку" className="mt-auto text-slate-600 hover:text-slate-300 transition-colors">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col w-80 shrink-0">
-      <div className="flex items-center gap-2 px-1 pb-3">
+    <div
+      ref={setSortRef}
+      style={sortStyle}
+      className={`flex flex-col w-80 shrink-0 ${isDragging ? "opacity-40" : ""}`}
+    >
+      <div
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        className="flex items-center gap-2 px-1 pb-3 cursor-grab active:cursor-grabbing"
+      >
         <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
         <h3 className="text-sm font-medium text-slate-300">
           {STATUS_LABELS[status]}
         </h3>
-        <span className="text-xs text-slate-600 ml-auto">{tickets.length}</span>
+        <span className="text-xs text-slate-600 ml-auto">
+          {tickets.length - liveCount}
+          {liveCount > 0 && ` + ${liveCount} live`}
+        </span>
         <button
+          type="button"
           onClick={() => onAddTicket(status)}
-          className="text-slate-600 hover:text-slate-300 transition-colors"
+          title="Добавить тикет в эту колонку"
+          aria-label="Добавить тикет в эту колонку"
+          className="text-slate-500 hover:text-slate-200 transition-colors"
         >
           <Plus className="w-4 h-4" />
         </button>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title="Свернуть колонку"
+          aria-label="Свернуть колонку"
+          className="text-slate-600 hover:text-slate-300 transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
       </div>
       <div
-        ref={setNodeRef}
+        ref={setDropRef}
         className={`flex-1 space-y-2 rounded-lg p-2 transition-colors min-h-32 ${
           isOver ? "bg-blue-500/5 ring-1 ring-blue-500/20" : ""
         }`}
       >
-        {tickets.map((ticket) => (
-          <DraggableTicket
-            key={ticket.id}
-            ticket={ticket}
-            projects={projects}
-            teams={teams}
-            onClick={() => onTicketClick(ticket)}
-          />
-        ))}
+        {tickets.map((ticket) =>
+          ticket.kind === "live" ? (
+            <LiveCard key={ticket.id} ticket={ticket} />
+          ) : (
+            <DraggableTicket
+              key={ticket.id}
+              ticket={ticket}
+              projects={projects}
+              teams={teams}
+              display={display}
+              onClick={() => onTicketClick(ticket)}
+            />
+          )
+        )}
         {tickets.length === 0 && (
           <div className="flex items-center justify-center h-24 text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg">
             Drop tickets here
@@ -297,8 +664,21 @@ export default function Board() {
   const [selectedTag, setSelectedTag] = useState<string>(() => readStored(STORAGE_TAG));
   const [search, setSearch] = useState("");
   const [fieldFilters, setFieldFilters] = useState<Record<string, string>>({});
+  // Фильтры вида не сохраняются; сортировка и настройки карточки — в localStorage
+  const [filters, setFilters] = useState<ViewFilters>(EMPTY_FILTERS);
+  const [sort, setSort] = useState<ViewSort>(readSort);
+  const [display, setDisplay] = useState<CardDisplay>(readDisplay);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
   const [activeTicket, setActiveTicket] = useState<Ticket | null>(null);
+  const [activeColumn, setActiveColumn] = useState<string | null>(null);
+  const [columnOrder, setColumnOrder] = useState<string[]>(() =>
+    normalizeColumnOrder(readList(STORAGE_COLUMN_ORDER))
+  );
+  const [collapsedColumns, setCollapsedColumns] = useState<string[]>(() =>
+    readList(STORAGE_COLLAPSED).filter((status) => STATUSES.includes(status))
+  );
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [createForStatus, setCreateForStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -306,6 +686,22 @@ export default function Board() {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
+
+  useEffect(() => {
+    writeList(STORAGE_COLUMN_ORDER, columnOrder);
+  }, [columnOrder]);
+
+  useEffect(() => {
+    writeList(STORAGE_COLLAPSED, collapsedColumns);
+  }, [collapsedColumns]);
+
+  useEffect(() => {
+    writeJson(STORAGE_SORT, sort);
+  }, [sort]);
+
+  useEffect(() => {
+    writeJson(STORAGE_DISPLAY, display);
+  }, [display]);
 
   const loadBoard = useCallback(async () => {
     try {
@@ -341,19 +737,59 @@ export default function Board() {
     loadBoard();
   }, [loadBoard]);
 
+  // Poll every 5 s so live cards update without a reload; paused while dragging a ticket or a column, or when the tab is hidden
+  useEffect(() => {
+    if (activeTicket || activeColumn) return;
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      api.board
+        .get(selectedProject || undefined)
+        .then((board) => setColumns(board.columns || []))
+        .catch(() => {});
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [selectedProject, activeTicket, activeColumn]);
+
   const allBoardTickets = columns.flatMap((c) => c.tickets);
   const boardTags = allTags(allBoardTickets);
   // Запомненного тега может уже не быть на доске
   const activeTag = boardTags.includes(selectedTag) ? selectedTag : "";
 
-  const getColumnTickets = (status: string) =>
-    (columns.find((c) => c.status === status)?.tickets || []).filter(
+  // Живые карточки не фильтруются; остальные проходят фильтры вида, затем сортировку
+  const getColumnTickets = (status: string) => {
+    const list = (columns.find((c) => c.status === status)?.tickets || []).filter(
       (t) =>
-        (!activeTag || tagNames(t).includes(activeTag)) &&
+        t.kind === "live" ||
+        ((!activeTag || tagNames(t).includes(activeTag)) &&
         matchesSearch(t, search) &&
-        CARD_FIELDS.every((name) => !fieldFilters[name] || t.fields?.[name] === fieldFilters[name])
+        CARD_FIELDS.every((name) => !fieldFilters[name] || t.fields?.[name] === fieldFilters[name]) &&
+        matchesFilters(t, filters))
     );
+    return sortTickets(list, sort);
+  };
 
+  // Видимые на доске тикеты (после всех фильтров, без живых карточек) — для массовой обработки
+  const visibleTickets = columns
+    .flatMap((c) => getColumnTickets(c.status))
+    .filter((t) => t.kind !== "live");
+  const totalFilterCount =
+    activeFilterCount(filters) + (activeTag ? 1 : 0) + CARD_FIELDS.filter((name) => fieldFilters[name]).length;
+
+  const toggleCollapsed = (status: string) => {
+    setCollapsedColumns((prev) =>
+      prev.includes(status) ? prev.filter((s) => s !== status) : [...prev, status]
+    );
+  };
+
+  // Empty means no tickets at all on the board for that status (live cards count, filters do not matter)
+  const collapseEmptyColumns = () => {
+    setCollapsedColumns(
+      STATUSES.filter((status) => {
+        const count = columns.find((c) => c.status === status)?.tickets.length ?? 0;
+        return collapsedColumns.includes(status) || count === 0;
+      })
+    );
+  };
 
   const findTicketById = (id: UniqueIdentifier): Ticket | undefined => {
     for (const col of columns) {
@@ -371,13 +807,17 @@ export default function Board() {
   };
 
   const handleDragStart = (event: DragStartEvent) => {
+    if (event.active.data.current?.type === COLUMN_DRAG) {
+      setActiveColumn(statusOfColumnId(event.active.id));
+      return;
+    }
     const ticket = findTicketById(event.active.id);
     setActiveTicket(ticket ?? null);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
     const { active, over } = event;
-    if (!over) return;
+    if (!over || active.data.current?.type === COLUMN_DRAG) return;
 
     const activeStatus = findColumnByTicketId(active.id);
     const overStatus = STATUSES.includes(over.id as string)
@@ -403,6 +843,17 @@ export default function Board() {
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
+
+    if (active.data.current?.type === COLUMN_DRAG) {
+      setActiveColumn(null);
+      const from = statusOfColumnId(active.id);
+      const to = over?.data.current?.type === COLUMN_DRAG ? statusOfColumnId(over.id) : null;
+      if (to && to !== from) {
+        setColumnOrder((prev) => arrayMove(prev, prev.indexOf(from), prev.indexOf(to)));
+      }
+      return;
+    }
+
     setActiveTicket(null);
 
     if (!over) return;
@@ -442,102 +893,188 @@ export default function Board() {
 
   return (
     <div className="h-full flex flex-col">
-      <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
-        <h1 className="text-lg font-semibold text-white">Board</h1>
+      <header className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-2 px-3 sm:px-6 min-h-14 py-2 border-b border-slate-800">
+        {/* Слева — самое частое: создать, выбрать проект, найти. Справа — фильтры и редкие действия в меню «⋯». */}
+        <h1 className="hidden xl:block text-lg font-semibold text-white mr-1">Доска</h1>
+        <button
+          type="button"
+          onClick={() => setCreateForStatus(STATUSES[0])}
+          title="Новый тикет"
+          aria-label="Новый тикет"
+          className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 lg:px-3 text-xs font-medium text-white hover:bg-blue-500 transition-colors focus:outline-none focus:ring-1 focus:ring-blue-400"
+        >
+          <Plus className="w-4 h-4" />
+          <span className="hidden lg:inline">Новый тикет</span>
+        </button>
         <select
           value={selectedProject}
           onChange={(e) => {
             setSelectedProject(e.target.value);
             setSelectedTag("");
             setFieldFilters({});
+            setFilters(EMPTY_FILTERS);
           }}
-          className="bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          title="Какой проект показать на доске"
+          className="h-8 min-w-0 flex-1 sm:flex-none sm:w-40 lg:w-48 truncate bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="">All Projects</option>
+          <option value="">Все проекты</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.icon} {p.name}
             </option>
           ))}
         </select>
-        <select
-          value={activeTag}
-          onChange={(e) => setSelectedTag(e.target.value)}
-          className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-        >
-          <option value="">All Tags</option>
-          {boardTags.map((tag) => (
-            <option key={tag} value={tag}>
-              {tag}
-            </option>
-          ))}
-        </select>
-        {CARD_FIELDS.map((name) => {
-          const values = fieldValues(allBoardTickets, name);
-          if (values.length === 0 && !fieldFilters[name]) return null;
-          return (
-            <select
-              key={name}
-              value={fieldFilters[name] || ""}
-              onChange={(e) => setFieldFilters((prev) => ({ ...prev, [name]: e.target.value }))}
-              className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="">{FIELD_FILTER_LABELS[name]}</option>
-              {values.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
-            </select>
-          );
-        })}
-        <div className="relative">
+        <div className="relative order-last w-full sm:order-none sm:w-auto sm:flex-1 sm:max-w-md sm:min-w-[9rem]">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск: номер, название, описание"
-            className="w-64 bg-slate-800 text-xs text-slate-300 placeholder:text-slate-600 rounded-md border border-slate-700 pl-8 pr-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder="Найти тикет…"
+            title="Ищет по номеру, названию и описанию"
+            className="h-8 w-full bg-slate-800 text-xs text-slate-300 placeholder:text-slate-500 rounded-md border border-slate-700 pl-8 pr-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
+        <div className="relative shrink-0 sm:ml-auto">
+          <button
+            type="button"
+            onClick={() => setViewOpen((open) => !open)}
+            title="Фильтры, порядок тикетов и что показывать на карточках"
+            aria-label="Фильтры и сортировка"
+            aria-expanded={viewOpen}
+            className={`${HEADER_BUTTON} ${viewOpen || totalFilterCount > 0 ? "border-blue-500/60 text-blue-300" : ""}`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span className="hidden lg:inline">Фильтры</span>
+            {totalFilterCount > 0 && (
+              <span className="rounded bg-blue-500/20 px-1.5 text-[10px] font-medium text-blue-300 tabular-nums">
+                {totalFilterCount}
+              </span>
+            )}
+          </button>
+          {viewOpen && (
+            <ViewMenu
+              filters={filters}
+              onFiltersChange={setFilters}
+              sort={sort}
+              onSortChange={setSort}
+              display={display}
+              onDisplayChange={setDisplay}
+              teams={teams}
+              fieldNames={boardFieldNames(allBoardTickets, display)}
+              onResetFilters={() => {
+                setFilters(EMPTY_FILTERS);
+                setSelectedTag("");
+                setFieldFilters({});
+              }}
+              quickFilters={
+                <>
+                  <Row label="С тегом">
+                    <select value={activeTag} onChange={(e) => setSelectedTag(e.target.value)} className={SELECT_CLASS}>
+                      <option value="">любым</option>
+                      {boardTags.map((tag) => (
+                        <option key={tag} value={tag}>
+                          {tag}
+                        </option>
+                      ))}
+                    </select>
+                  </Row>
+                  {CARD_FIELDS.map((name) => {
+                    const values = fieldValues(allBoardTickets, name);
+                    if (values.length === 0 && !fieldFilters[name]) return null;
+                    return (
+                      <Row key={name} label={FIELD_ROW_LABELS[name] ?? name}>
+                        <select
+                          value={fieldFilters[name] || ""}
+                          onChange={(e) => setFieldFilters((prev) => ({ ...prev, [name]: e.target.value }))}
+                          className={SELECT_CLASS}
+                        >
+                          <option value="">любой</option>
+                          {values.map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      </Row>
+                    );
+                  })}
+                </>
+              }
+              onClose={() => setViewOpen(false)}
+            />
+          )}
+        </div>
+        <MoreMenu
+          items={[
+            {
+              icon: ListChecks,
+              label: "Изменить несколько тикетов…",
+              hint: "Статус, важность, тег или поле — сразу у всех подходящих",
+              onClick: () => setBulkOpen(true),
+            },
+            {
+              icon: ChevronLeft,
+              label: "Свернуть пустые колонки",
+              hint: "Колонки, в которых нет ни одного тикета",
+              onClick: collapseEmptyColumns,
+            },
+          ]}
+        />
       </header>
 
       <div className="flex-1 overflow-x-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-600">
-            Loading board…
+            Загружаю доску…
           </div>
         ) : (
           <DndContext
             sensors={sensors}
-            collisionDetection={closestCorners}
+            // Без компенсации сдвига макета: иначе страница прокручивается при переносе карточки между колонками
+            autoScroll={{ layoutShiftCompensation: false }}
+            collisionDetection={collisionByDragKind}
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
-            <div className="flex gap-6 h-full">
-              {STATUSES.map((status) => (
-                <Column
-                  key={status}
-                  status={status}
-                  tickets={getColumnTickets(status)}
-                  projects={projects}
-                  teams={teams}
-                  onTicketClick={handleTicketClick}
-                  onAddTicket={setCreateForStatus}
-                />
-              ))}
-            </div>
+            <SortableContext items={columnOrder.map(columnId)} strategy={horizontalListSortingStrategy}>
+              <div className="flex gap-6 h-full">
+                {columnOrder.map((status) => (
+                  <Column
+                    key={status}
+                    status={status}
+                    tickets={getColumnTickets(status)}
+                    projects={projects}
+                    teams={teams}
+                    display={display}
+                    collapsed={collapsedColumns.includes(status)}
+                    onToggleCollapsed={() => toggleCollapsed(status)}
+                    onTicketClick={handleTicketClick}
+                    onAddTicket={setCreateForStatus}
+                  />
+                ))}
+              </div>
+            </SortableContext>
             <DragOverlay>
               {activeTicket ? (
                 <div className="w-80">
-                  <TicketCard ticket={activeTicket} projects={projects} teams={teams} isDragging />
+                  <TicketCard ticket={activeTicket} projects={projects} teams={teams} display={display} isDragging />
                 </div>
               ) : null}
             </DragOverlay>
            </DndContext>
         )}
       </div>
+
+      {bulkOpen && (
+        <BulkMenu
+          tickets={visibleTickets}
+          allTickets={allBoardTickets}
+          onClose={() => setBulkOpen(false)}
+          onDone={loadBoard}
+        />
+      )}
 
       {createForStatus && (
         <CreateTicketModal
