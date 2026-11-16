@@ -10,6 +10,7 @@ import (
 
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/version"
 )
 
 type MCPServer struct {
@@ -122,7 +123,7 @@ func (s *MCPServer) handleRequest(req jsonrpcRequest) *jsonrpcResponse {
 				},
 				"serverInfo": map[string]any{
 					"name":    "taskboard",
-					"version": "0.6.0",
+					"version": version.Version,
 				},
 			},
 		}

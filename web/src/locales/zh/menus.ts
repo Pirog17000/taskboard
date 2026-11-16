@@ -8,11 +8,14 @@ const zh: Record<keyof typeof ru, string> = {
   "nav.settings": "设置",
   "nav.expand": "展开菜单",
   "nav.collapse": "收起菜单",
-  "nav.version": "版本 {version}",
 
   "settings.title": "设置",
   "settings.language": "界面语言",
   "settings.languageHint": "立即生效，并保存在此浏览器中",
+  "settings.about": "关于",
+  "settings.version": "版本",
+  "settings.versionUnknown": "未知",
+  "settings.source": "GitHub 上的源代码",
 
   "view.onlyTickets": "仅显示工单",
   "view.priority": "优先级",

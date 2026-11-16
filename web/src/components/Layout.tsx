@@ -131,13 +131,6 @@ export default function Layout() {
           </NavLink>
         </div>
 
-        {!collapsed && (
-          <div className="px-5 py-3 border-t border-slate-800">
-            <p className="text-[10px] text-slate-600 tracking-wider uppercase">
-              {t("nav.version", { version: "0.6.0" })}
-            </p>
-          </div>
-        )}
       </aside>
 
       {/* key={lang}: при смене языка страница пересоздаётся и перечитывает все подписи */}

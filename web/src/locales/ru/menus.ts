@@ -7,11 +7,14 @@ export default {
   "nav.settings": "Настройки",
   "nav.expand": "Развернуть меню",
   "nav.collapse": "Свернуть меню",
-  "nav.version": "Версия {version}",
 
   "settings.title": "Настройки",
   "settings.language": "Язык интерфейса",
   "settings.languageHint": "Меняется сразу и запоминается в этом браузере",
+  "settings.about": "О программе",
+  "settings.version": "Версия",
+  "settings.versionUnknown": "не удалось узнать",
+  "settings.source": "Исходный код на GitHub",
 
   "view.onlyTickets": "Показывать только тикеты",
   "view.priority": "С важностью",

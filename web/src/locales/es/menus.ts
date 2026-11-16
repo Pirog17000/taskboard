@@ -8,11 +8,14 @@ const es: Record<keyof typeof ru, string> = {
   "nav.settings": "Ajustes",
   "nav.expand": "Expandir menú",
   "nav.collapse": "Contraer menú",
-  "nav.version": "Versión {version}",
 
   "settings.title": "Ajustes",
   "settings.language": "Idioma de la interfaz",
   "settings.languageHint": "Se aplica al instante y se recuerda en este navegador",
+  "settings.about": "Acerca de",
+  "settings.version": "Versión",
+  "settings.versionUnknown": "desconocida",
+  "settings.source": "Código fuente en GitHub",
 
   "view.onlyTickets": "Mostrar solo tickets",
   "view.priority": "Prioridad",

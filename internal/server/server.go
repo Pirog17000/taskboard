@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/tcarac/taskboard/internal/db"
 	"github.com/tcarac/taskboard/internal/models"
+	"github.com/tcarac/taskboard/internal/version"
 )
 
 type Server struct {
@@ -111,6 +112,10 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 		r.Delete("/live", s.removeLive)
 
 		r.Get("/board", s.getBoard)
+
+		r.Get("/version", func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]string{"version": version.Version, "repo": version.RepoURL})
+		})
 	})
 
 	if webFS != nil {

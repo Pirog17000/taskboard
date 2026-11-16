@@ -109,7 +109,13 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export interface AppInfo {
+  version: string;
+  repo: string;
+}
+
 export const api = {
+  info: () => request<AppInfo>("/api/version"),
   projects: {
     list: () => request<Project[]>("/api/projects"),
     get: (id: string) => request<Project>(`/api/projects/${id}`),
