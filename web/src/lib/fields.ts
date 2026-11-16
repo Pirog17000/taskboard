@@ -1,12 +1,13 @@
 import type { Ticket } from "../api/client";
+import { t, type TKey } from "./i18n";
 
 // Поля, которые показываются на карточке и доступны как быстрые фильтры; остальные видны в панели тикета.
 export const CARD_FIELDS = ["class", "stage"] as const;
 
-export const FIELD_FILTER_LABELS: Record<string, string> = {
-  class: "Все классы",
-  stage: "Все стадии",
-};
+// Подпись пункта «все значения» в быстром фильтре по полю
+export function fieldFilterLabel(name: string): string {
+  return name === "class" || name === "stage" ? t(`pages.fields.all_${name}` as TKey) : name;
+}
 
 export function ticketKey(ticket: Ticket): string {
   return `${ticket.projectPrefix}-${ticket.number}`;

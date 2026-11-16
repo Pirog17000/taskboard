@@ -2,7 +2,8 @@ import { useRef, useState } from "react";
 import { X, Trash2, CheckCircle2, Circle, Pencil, Eye } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Ticket, type TicketInput, type Project, type Team, type Subtask, type Question, type TicketLink } from "../api/client";
-import { STATUSES, STATUS_LABELS } from "../lib/statuses";
+import { STATUSES, statusLabel, priorityLabel } from "../lib/statuses";
+import { t } from "../lib/i18n";
 import { parseTags, tagNames } from "../lib/tags";
 import { linkLabel } from "../lib/links";
 
@@ -120,14 +121,14 @@ export default function TicketPanel({
   const labelFor = (name: string) => ticket.labels?.find((l) => l.name === name);
 
   const removeTag = (name: string) => {
-    setTags(tagList.filter((t) => t !== name).join(", "));
+    setTags(tagList.filter((x) => x !== name).join(", "));
     markDirty();
   };
 
   const addTag = () => {
-    const t = newTag.trim();
-    if (t && !tagList.includes(t)) {
-      setTags([...tagList, t].join(", "));
+    const tag = newTag.trim();
+    if (tag && !tagList.includes(tag)) {
+      setTags([...tagList, tag].join(", "));
       markDirty();
     }
     setNewTag("");
@@ -186,11 +187,11 @@ export default function TicketPanel({
     setDirty(false);
   };
 
-  const applyFields = (t: Ticket) => setFields(t.fields || {});
+  const applyFields = (tk: Ticket) => setFields(tk.fields || {});
 
-  const applyDependencies = (t: Ticket) => {
-    setBlockedByKeys(t.blockedByKeys || []);
-    setOpenBlockerKeys(t.openBlockerKeys || []);
+  const applyDependencies = (tk: Ticket) => {
+    setBlockedByKeys(tk.blockedByKeys || []);
+    setOpenBlockerKeys(tk.openBlockerKeys || []);
   };
 
   // Пустое значение удаляет поле.
@@ -301,8 +302,8 @@ export default function TicketPanel({
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="Изменить ширину панели"
-          title="Перетащите, чтобы изменить ширину. Двойной клик — сброс"
+          aria-label={t("ticket.resizeLabel")}
+          title={t("ticket.resizeHint")}
           onPointerDown={onResizeStart}
           onPointerMove={onResizeMove}
           onPointerUp={onResizeEnd}
@@ -324,7 +325,7 @@ export default function TicketPanel({
                     key={l.key}
                     className="inline-flex items-center rounded bg-orange-500/10 px-1.5 py-0.5 text-[11px] font-medium text-orange-400"
                   >
-                    duplicate of {l.key}
+                    {t("ticket.duplicateOf", { key: l.key })}
                   </span>
                 ))}
             </div>
@@ -358,7 +359,7 @@ export default function TicketPanel({
             />
 
             <div>
-              <SectionHeader title="Описание" />
+              <SectionHeader title={t("ticket.section.description")} />
               <div className="flex items-center gap-1 mb-1">
                 <button
                   type="button"
@@ -370,7 +371,7 @@ export default function TicketPanel({
                   }`}
                 >
                   <Pencil className="w-3 h-3" />
-                  Write
+                  {t("ticket.descWrite")}
                 </button>
                 <button
                   type="button"
@@ -382,7 +383,7 @@ export default function TicketPanel({
                   }`}
                 >
                   <Eye className="w-3 h-3" />
-                  Preview
+                  {t("ticket.descPreview")}
                 </button>
               </div>
               {descMode === "write" ? (
@@ -393,7 +394,7 @@ export default function TicketPanel({
                     markDirty();
                   }}
                   rows={8}
-                  placeholder="Add a description (supports markdown)…"
+                  placeholder={t("ticket.descPlaceholder")}
                   className="w-full bg-slate-800/50 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-slate-300 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y font-mono min-h-[10.5rem]"
                 />
               ) : description ? (
@@ -405,16 +406,16 @@ export default function TicketPanel({
                   onClick={() => setDescMode("write")}
                   className="bg-slate-800/50 border border-slate-700 rounded-lg px-2.5 py-1.5 min-h-[10.5rem] text-sm text-slate-600 cursor-text"
                 >
-                  Add a description…
+                  {t("ticket.descEmpty")}
                 </div>
               )}
             </div>
 
             <div className={SECTION}>
               <SectionHeader
-                title="Вопросы"
+                title={t("ticket.section.questions")}
                 count={questions.length}
-                warning={unansweredCount > 0 ? `без ответа: ${unansweredCount}` : undefined}
+                warning={unansweredCount > 0 ? t("ticket.unanswered", { count: unansweredCount }) : undefined}
               />
               <div className="space-y-2">
                 {questions.map((q) => {
@@ -442,7 +443,7 @@ export default function TicketPanel({
                         onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
                         onBlur={() => handleSaveAnswer(q.id)}
                         rows={2}
-                        placeholder="Ваш ответ…"
+                        placeholder={t("ticket.answerPlaceholder")}
                         className="mt-1.5 w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y"
                       />
                     </div>
@@ -453,20 +454,20 @@ export default function TicketPanel({
                 <input
                   value={newQuestion}
                   onChange={(e) => setNewQuestion(e.target.value)}
-                  placeholder="Добавить вопрос…"
+                  placeholder={t("ticket.addQuestionPlaceholder")}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
                   className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </form>
             </div>
 
             <div className={SECTION}>
-              <SectionHeader title="Tags" count={tagList.length} />
+              <SectionHeader title={t("ticket.section.tags")} count={tagList.length} />
               <div className="flex flex-wrap gap-1 mb-1">
                 {tagList.map((name) => {
                   const label = labelFor(name);
@@ -482,7 +483,7 @@ export default function TicketPanel({
                       <button
                         type="button"
                         onClick={() => removeTag(name)}
-                        aria-label={`Убрать тег ${name}`}
+                        aria-label={t("ticket.removeTag", { name })}
                         className="opacity-70 hover:opacity-100 transition-opacity"
                       >
                         <X className="w-3 h-3" />
@@ -495,17 +496,17 @@ export default function TicketPanel({
                 value={newTag}
                 onChange={(e) => setNewTag(e.target.value)}
                 onKeyDown={handleTagKeyDown}
-                placeholder="Добавить тег, Enter или запятая…"
+                placeholder={t("ticket.addTagPlaceholder")}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
 
             <div className={SECTION}>
-              <SectionHeader title="Свойства" />
+              <SectionHeader title={t("ticket.section.properties")} />
               <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">
-                    Status
+                    {t("ticket.status")}
                   </label>
                   <select
                     value={status}
@@ -517,14 +518,14 @@ export default function TicketPanel({
                   >
                     {STATUSES.map((s) => (
                       <option key={s} value={s}>
-                        {STATUS_LABELS[s]}
+                        {statusLabel(s)}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">
-                    Priority
+                    {t("ticket.priority")}
                   </label>
                   <select
                     value={priority}
@@ -536,14 +537,14 @@ export default function TicketPanel({
                   >
                     {PRIORITIES.map((p) => (
                       <option key={p} value={p}>
-                        {p}
+                        {priorityLabel(p)}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">
-                    Due Date
+                    {t("ticket.dueDate")}
                   </label>
                   <input
                     type="date"
@@ -557,7 +558,7 @@ export default function TicketPanel({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">
-                    Team
+                    {t("ticket.team")}
                   </label>
                   <select
                     value={teamId}
@@ -567,17 +568,17 @@ export default function TicketPanel({
                     }}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
-                    <option value="">None</option>
-                    {teams.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
+                    <option value="">{t("common.none")}</option>
+                    {teams.map((tm) => (
+                      <option key={tm.id} value={tm.id}>
+                        {tm.name}
                       </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-500 mb-1">
-                    Project
+                    {t("ticket.project")}
                   </label>
                   <div className="text-sm text-slate-400 px-2.5 py-1.5">
                     {projects.find((p) => p.id === ticket.projectId)?.name || "—"}
@@ -591,12 +592,12 @@ export default function TicketPanel({
                 onClick={handleSave}
                 className="w-full px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
               >
-                Save Changes
+                {t("ticket.saveChanges")}
               </button>
             )}
 
             <div className={SECTION}>
-              <SectionHeader title="Поля" />
+              <SectionHeader title={t("ticket.section.fields")} />
               <div className="space-y-1">
                 {Object.keys(fields)
                   .sort()
@@ -624,26 +625,26 @@ export default function TicketPanel({
                 <input
                   value={newFieldName}
                   onChange={(e) => setNewFieldName(e.target.value)}
-                  placeholder="Поле (например, class)"
+                  placeholder={t("ticket.fieldNamePlaceholder")}
                   className="w-40 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <input
                   value={newFieldValue}
                   onChange={(e) => setNewFieldValue(e.target.value)}
-                  placeholder="Значение"
+                  placeholder={t("ticket.fieldValuePlaceholder")}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
                   className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </form>
             </div>
 
             <div className={SECTION}>
-              <SectionHeader title="Зависимости" />
+              <SectionHeader title={t("ticket.section.dependencies")} />
               <div className="space-y-1">
                 {blockedByKeys.map((key) => (
                   <div
@@ -654,7 +655,7 @@ export default function TicketPanel({
                     <span
                       className={`text-xs ${openBlockerKeys.includes(key) ? "text-red-400" : "text-green-500"}`}
                     >
-                      {openBlockerKeys.includes(key) ? "блокирует" : "готово"}
+                      {openBlockerKeys.includes(key) ? t("ticket.blocking") : t("ticket.blockerDone")}
                     </span>
                     <button
                       onClick={() => handleRemoveDependency(key)}
@@ -665,28 +666,28 @@ export default function TicketPanel({
                   </div>
                 ))}
                 {blockedByKeys.length === 0 && (
-                  <div className="px-2 text-sm text-slate-600">Тикет ничем не заблокирован</div>
+                  <div className="px-2 text-sm text-slate-600">{t("ticket.noBlockers")}</div>
                 )}
               </div>
               <form onSubmit={handleAddDependency} className="mt-2 flex gap-2">
                 <input
                   value={newBlocker}
                   onChange={(e) => setNewBlocker(e.target.value)}
-                  placeholder="Заблокирован тикетом (например, UE-80)"
+                  placeholder={t("ticket.blockerPlaceholder")}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
                   className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </form>
               {depError && <p className="mt-1 text-xs text-red-400">{depError}</p>}
             </div>
 
             <div className={SECTION}>
-              <SectionHeader title="Links" />
+              <SectionHeader title={t("ticket.section.links")} />
               <div className="space-y-1">
                 {links.map((link) => (
                   <div
@@ -703,7 +704,7 @@ export default function TicketPanel({
                     </button>
                   </div>
                 ))}
-                {links.length === 0 && <div className="px-2 text-sm text-slate-600">No links</div>}
+                {links.length === 0 && <div className="px-2 text-sm text-slate-600">{t("ticket.noLinks")}</div>}
               </div>
               <form onSubmit={handleAddLink} className="mt-2 flex gap-2">
                 <select
@@ -711,20 +712,20 @@ export default function TicketPanel({
                   onChange={(e) => setNewLinkType(e.target.value)}
                   className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1.5 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
-                  <option value="relates_to">relates to</option>
-                  <option value="duplicates">is a duplicate of</option>
+                  <option value="relates_to">{t("ticket.linkRelates")}</option>
+                  <option value="duplicates">{t("ticket.linkDuplicates")}</option>
                 </select>
                 <input
                   value={newLinkTarget}
                   onChange={(e) => setNewLinkTarget(e.target.value)}
-                  placeholder="Ticket key (e.g. UE-80)"
+                  placeholder={t("ticket.linkPlaceholder")}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
                   className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </form>
               {linkError && <p className="mt-1 text-xs text-red-400">{linkError}</p>}
@@ -732,7 +733,7 @@ export default function TicketPanel({
 
             <div className={SECTION}>
               <SectionHeader
-                title="Subtasks"
+                title={t("ticket.section.subtasks")}
                 count={subtasks.length > 0 ? `${subtasksDone}/${subtasks.length}` : undefined}
               />
               <div className="space-y-1">
@@ -773,14 +774,14 @@ export default function TicketPanel({
                 <input
                   value={newSubtask}
                   onChange={(e) => setNewSubtask(e.target.value)}
-                  placeholder="Add subtask…"
+                  placeholder={t("ticket.addSubtaskPlaceholder")}
                   className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
                   className="px-3 py-1.5 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors"
                 >
-                  Add
+                  {t("common.add")}
                 </button>
               </form>
             </div>

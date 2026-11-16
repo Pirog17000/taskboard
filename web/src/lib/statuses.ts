@@ -1,15 +1,17 @@
+import { t, type TKey } from "./i18n";
+
 // Статусы тикетов. Порядок совпадает с models.TicketStatuses на бэкенде (internal/models/models.go).
 export const STATUSES = ["triage", "backlog", "todo", "in_progress", "ready_for_review", "done", "cancelled"];
 
-export const STATUS_LABELS: Record<string, string> = {
-  triage: "Needs decision",
-  backlog: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  ready_for_review: "Ready for Review",
-  done: "Done",
-  cancelled: "Cancelled",
-};
+// Подпись статуса на текущем языке; неизвестный статус показывается как есть
+export function statusLabel(status: string): string {
+  return (STATUSES as string[]).includes(status) ? t(`status.${status}` as TKey) : status;
+}
+
+// Подпись важности на текущем языке
+export function priorityLabel(priority: string): string {
+  return ["urgent", "high", "medium", "low"].includes(priority) ? t(`priority.${priority}` as TKey) : priority;
+}
 
 export const STATUS_COLORS: Record<string, string> = {
   triage: "bg-fuchsia-500",

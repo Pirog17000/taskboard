@@ -44,7 +44,8 @@ import {
 import { api, type Ticket, type TicketInput, type Project, type Team, type BoardColumn } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
-import { STATUSES, STATUS_LABELS, STATUS_COLORS } from "../lib/statuses";
+import { STATUSES, statusLabel, priorityLabel, STATUS_COLORS } from "../lib/statuses";
+import { t, formatDate, type TKey } from "../lib/i18n";
 import { allTags, tagNames } from "../lib/tags";
 import { duplicateOfKeys } from "../lib/links";
 import { CARD_FIELDS, fieldValues, matchesSearch } from "../lib/fields";
@@ -52,7 +53,7 @@ import {
   DEFAULT_DISPLAY,
   DEFAULT_SORT,
   EMPTY_FILTERS,
-  SORT_LABELS,
+  SORT_KEYS,
   activeFilterCount,
   boardFieldNames,
   cardFieldEntries,
@@ -79,7 +80,7 @@ const HEADER_BUTTON =
   "inline-flex h-8 min-w-8 items-center justify-center gap-1.5 bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2 hover:border-slate-500 hover:text-slate-100 transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500";
 
 // Подписи быстрых фильтров по полям внутри меню фильтров
-const FIELD_ROW_LABELS: Record<string, string> = { class: "Класс", stage: "Стадия" };
+const FIELD_ROW_KEYS: Record<string, TKey> = { class: "board.field.class", stage: "board.field.stage" };
 
 interface MoreMenuItem {
   icon: typeof Plus;
@@ -114,8 +115,8 @@ function MoreMenu({ items }: { items: MoreMenuItem[] }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        title="Другие действия"
-        aria-label="Другие действия"
+        title={t("board.moreActions")}
+        aria-label={t("board.moreActions")}
         aria-haspopup="menu"
         aria-expanded={open}
         className={`${HEADER_BUTTON} ${open ? "border-blue-500/60 text-blue-300" : ""}`}
@@ -205,7 +206,6 @@ function readJsonObject(key: string): Record<string, unknown> | null {
   }
 }
 
-const SORT_KEYS = Object.keys(SORT_LABELS) as SortKey[];
 
 // Сортировка из localStorage: неизвестный ключ сбрасывается на значение по умолчанию
 function readSort(): ViewSort {
@@ -266,7 +266,7 @@ function PriorityBadge({ priority }: { priority: string }) {
   return (
     <span className={`inline-flex items-center gap-1 text-xs ${config.color}`}>
       <Icon className="w-3 h-3" />
-      {priority}
+      {priorityLabel(priority)}
     </span>
   );
 }
@@ -297,32 +297,32 @@ function QuestionCounter({ questions }: { questions: Ticket["questions"] }) {
   return (
     <div className="flex items-center gap-1.5 text-xs text-amber-400">
       <HelpCircle className="w-3 h-3" />
-      Вопросов без ответа: {open}
+      {t("board.openQuestions", { count: open })}
     </div>
   );
 }
 
-const LIVE_STYLES: Record<string, { box: string; chip: string; bar: string; text: string; label: string }> = {
+const LIVE_STYLES: Record<string, { box: string; chip: string; bar: string; text: string; labelKey: TKey }> = {
   running: {
     box: "border-blue-500/60 bg-blue-950/40",
     chip: "bg-blue-500/20 text-blue-300",
     bar: "bg-blue-500",
     text: "text-blue-300",
-    label: "LIVE",
+    labelKey: "board.live.running",
   },
   ok: {
     box: "border-green-500/60 bg-green-950/40",
     chip: "bg-green-500/20 text-green-300",
     bar: "bg-green-500",
     text: "text-green-300",
-    label: "ГОТОВО",
+    labelKey: "board.live.done",
   },
   failed: {
     box: "border-red-500/60 bg-red-950/40",
     chip: "bg-red-500/20 text-red-300",
     bar: "bg-red-500",
     text: "text-red-300",
-    label: "ОШИБКА",
+    labelKey: "board.live.error",
   },
 };
 
@@ -340,7 +340,7 @@ function LiveCard({ ticket }: { ticket: Ticket }) {
           }`}
         >
           <Activity className="w-3 h-3" />
-          {st.label}
+          {t(st.labelKey)}
         </span>
         <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-100" title={ticket.title}>
           {ticket.title}
@@ -426,10 +426,10 @@ function TicketCard({
       {(ticket.openBlockers ?? 0) > 0 && (
         <span
           className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-400"
-          title="Ждёт завершения этих тикетов"
+          title={t("board.blockedHint")}
         >
           <Lock className="w-3 h-3" />
-          заблокирован: {(ticket.openBlockerKeys || []).join(", ")}
+          {t("board.blockedBy", { keys: (ticket.openBlockerKeys || []).join(", ") })}
         </span>
       )}
       {fieldEntries.length > 0 && (
@@ -476,7 +476,7 @@ function TicketCard({
       {ticket.dueDate && (
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <Calendar className="w-3 h-3" />
-          {new Date(ticket.dueDate).toLocaleDateString()}
+          {formatDate(ticket.dueDate)}
         </div>
       )}
       <SubtaskProgress subtasks={ticket.subtasks} />
@@ -570,17 +570,17 @@ function Column({
           {...attributes}
           {...listeners}
           onClick={onToggleCollapsed}
-          title={`Развернуть колонку «${STATUS_LABELS[status]}»`}
+          title={t("board.expandColumnNamed", { name: statusLabel(status) })}
           className={`flex flex-1 flex-col items-center gap-3 rounded-lg border border-slate-800 bg-slate-900/40 py-3 cursor-pointer transition-colors hover:border-slate-600 ${
             isOver ? "bg-blue-500/5 ring-1 ring-blue-500/20" : ""
           }`}
         >
           <div className={`w-2 h-2 shrink-0 rounded-full ${STATUS_COLORS[status]}`} />
           <span className="text-sm font-medium text-slate-300 whitespace-nowrap [writing-mode:vertical-rl]">
-            {STATUS_LABELS[status]}
+            {statusLabel(status)}
           </span>
           <span className="text-xs text-slate-600 tabular-nums">{tickets.length}</span>
-          <button type="button" aria-label="Развернуть колонку" className="mt-auto text-slate-600 hover:text-slate-300 transition-colors">
+          <button type="button" aria-label={t("board.expandColumn")} className="mt-auto text-slate-600 hover:text-slate-300 transition-colors">
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
@@ -602,17 +602,17 @@ function Column({
       >
         <div className={`w-2 h-2 rounded-full ${STATUS_COLORS[status]}`} />
         <h3 className="text-sm font-medium text-slate-300">
-          {STATUS_LABELS[status]}
+          {statusLabel(status)}
         </h3>
         <span className="text-xs text-slate-600 ml-auto">
           {tickets.length - liveCount}
-          {liveCount > 0 && ` + ${liveCount} live`}
+          {liveCount > 0 && ` ${t("board.liveCount", { count: liveCount })}`}
         </span>
         <button
           type="button"
           onClick={() => onAddTicket(status)}
-          title="Добавить тикет в эту колонку"
-          aria-label="Добавить тикет в эту колонку"
+          title={t("board.addToColumn")}
+          aria-label={t("board.addToColumn")}
           className="text-slate-500 hover:text-slate-200 transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -620,8 +620,8 @@ function Column({
         <button
           type="button"
           onClick={onToggleCollapsed}
-          title="Свернуть колонку"
-          aria-label="Свернуть колонку"
+          title={t("board.collapseColumn")}
+          aria-label={t("board.collapseColumn")}
           className="text-slate-600 hover:text-slate-300 transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
@@ -649,7 +649,7 @@ function Column({
         )}
         {tickets.length === 0 && (
           <div className="flex items-center justify-center h-24 text-xs text-slate-700 border border-dashed border-slate-800 rounded-lg">
-            Drop tickets here
+            {t("board.dropHere")}
           </div>
         )}
       </div>
@@ -895,16 +895,15 @@ export default function Board() {
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex flex-wrap sm:flex-nowrap items-center gap-2 px-3 sm:px-6 min-h-14 py-2 border-b border-slate-800">
         {/* Слева — самое частое: создать, выбрать проект, найти. Справа — фильтры и редкие действия в меню «⋯». */}
-        <h1 className="hidden xl:block text-lg font-semibold text-white mr-1">Доска</h1>
         <button
           type="button"
           onClick={() => setCreateForStatus(STATUSES[0])}
-          title="Новый тикет"
-          aria-label="Новый тикет"
+          title={t("board.newTicket")}
+          aria-label={t("board.newTicket")}
           className="shrink-0 inline-flex h-8 items-center gap-1.5 rounded-md bg-blue-600 px-2.5 lg:px-3 text-xs font-medium text-white hover:bg-blue-500 transition-colors focus:outline-none focus:ring-1 focus:ring-blue-400"
         >
           <Plus className="w-4 h-4" />
-          <span className="hidden lg:inline">Новый тикет</span>
+          <span className="hidden lg:inline">{t("board.newTicket")}</span>
         </button>
         <select
           value={selectedProject}
@@ -914,10 +913,10 @@ export default function Board() {
             setFieldFilters({});
             setFilters(EMPTY_FILTERS);
           }}
-          title="Какой проект показать на доске"
+          title={t("board.projectHint")}
           className="h-8 min-w-0 flex-1 sm:flex-none sm:w-40 lg:w-48 truncate bg-slate-800 text-sm text-slate-300 rounded-md border border-slate-700 px-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="">Все проекты</option>
+          <option value="">{t("board.allProjects")}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.icon} {p.name}
@@ -930,8 +929,8 @@ export default function Board() {
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Найти тикет…"
-            title="Ищет по номеру, названию и описанию"
+            placeholder={t("board.search")}
+            title={t("board.searchHint")}
             className="h-8 w-full bg-slate-800 text-xs text-slate-300 placeholder:text-slate-500 rounded-md border border-slate-700 pl-8 pr-2.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
@@ -939,13 +938,13 @@ export default function Board() {
           <button
             type="button"
             onClick={() => setViewOpen((open) => !open)}
-            title="Фильтры, порядок тикетов и что показывать на карточках"
-            aria-label="Фильтры и сортировка"
+            title={t("board.filtersHint")}
+            aria-label={t("board.filtersAria")}
             aria-expanded={viewOpen}
             className={`${HEADER_BUTTON} ${viewOpen || totalFilterCount > 0 ? "border-blue-500/60 text-blue-300" : ""}`}
           >
             <SlidersHorizontal className="w-4 h-4" />
-            <span className="hidden lg:inline">Фильтры</span>
+            <span className="hidden lg:inline">{t("board.filters")}</span>
             {totalFilterCount > 0 && (
               <span className="rounded bg-blue-500/20 px-1.5 text-[10px] font-medium text-blue-300 tabular-nums">
                 {totalFilterCount}
@@ -969,9 +968,9 @@ export default function Board() {
               }}
               quickFilters={
                 <>
-                  <Row label="С тегом">
+                  <Row label={t("board.field.tag")}>
                     <select value={activeTag} onChange={(e) => setSelectedTag(e.target.value)} className={SELECT_CLASS}>
-                      <option value="">любым</option>
+                      <option value="">{t("board.anyTag")}</option>
                       {boardTags.map((tag) => (
                         <option key={tag} value={tag}>
                           {tag}
@@ -983,13 +982,13 @@ export default function Board() {
                     const values = fieldValues(allBoardTickets, name);
                     if (values.length === 0 && !fieldFilters[name]) return null;
                     return (
-                      <Row key={name} label={FIELD_ROW_LABELS[name] ?? name}>
+                      <Row key={name} label={FIELD_ROW_KEYS[name] ? t(FIELD_ROW_KEYS[name]) : name}>
                         <select
                           value={fieldFilters[name] || ""}
                           onChange={(e) => setFieldFilters((prev) => ({ ...prev, [name]: e.target.value }))}
                           className={SELECT_CLASS}
                         >
-                          <option value="">любой</option>
+                          <option value="">{t("board.anyValue")}</option>
                           {values.map((v) => (
                             <option key={v} value={v}>
                               {v}
@@ -1009,14 +1008,14 @@ export default function Board() {
           items={[
             {
               icon: ListChecks,
-              label: "Изменить несколько тикетов…",
-              hint: "Статус, важность, тег или поле — сразу у всех подходящих",
+              label: t("board.bulkEdit"),
+              hint: t("board.bulkEditHint"),
               onClick: () => setBulkOpen(true),
             },
             {
               icon: ChevronLeft,
-              label: "Свернуть пустые колонки",
-              hint: "Колонки, в которых нет ни одного тикета",
+              label: t("board.collapseEmpty"),
+              hint: t("board.collapseEmptyHint"),
               onClick: collapseEmptyColumns,
             },
           ]}
@@ -1026,7 +1025,7 @@ export default function Board() {
       <div className="flex-1 overflow-x-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center h-full text-slate-600">
-            Загружаю доску…
+            {t("board.loading")}
           </div>
         ) : (
           <DndContext

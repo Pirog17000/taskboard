@@ -2,13 +2,16 @@ import { useEffect, useRef, type ReactNode } from "react";
 import type { Team } from "../api/client";
 import {
   DEFAULT_DISPLAY,
-  SORT_LABELS,
+  SORT_KEYS,
+  sortLabel,
   isFieldShown,
   type CardDisplay,
   type SortKey,
   type ViewFilters,
   type ViewSort,
 } from "../lib/boardView";
+import { t } from "../lib/i18n";
+import { priorityLabel } from "../lib/statuses";
 
 interface ViewMenuProps {
   filters: ViewFilters;
@@ -30,12 +33,7 @@ export const SELECT_CLASS =
   "w-full bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const SECTION_TITLE = "text-[11px] font-semibold uppercase tracking-wide text-slate-500";
 
-const PRIORITY_OPTIONS: [string, string][] = [
-  ["urgent", "Срочная"],
-  ["high", "Высокая"],
-  ["medium", "Средняя"],
-  ["low", "Низкая"],
-];
+const PRIORITY_OPTIONS = ["urgent", "high", "medium", "low"];
 
 export function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -102,55 +100,55 @@ export default function ViewMenu({
       className="fixed inset-x-2 top-14 z-40 max-h-[calc(100dvh-4.5rem)] sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-1 sm:w-80 sm:max-h-[75vh] overflow-y-auto space-y-3 rounded-lg border border-slate-700 bg-slate-900 p-3 shadow-xl"
     >
       <section className="space-y-2">
-        <h3 className={SECTION_TITLE}>Показывать только тикеты</h3>
+        <h3 className={SECTION_TITLE}>{t("view.onlyTickets")}</h3>
         {quickFilters}
-        <Row label="С важностью">
+        <Row label={t("view.priority")}>
           <select value={filters.priority} onChange={(e) => setFilter("priority", e.target.value)} className={SELECT_CLASS}>
-            <option value="">любой</option>
-            {PRIORITY_OPTIONS.map(([value, label]) => (
+            <option value="">{t("view.anyPriority")}</option>
+            {PRIORITY_OPTIONS.map((value) => (
               <option key={value} value={value}>
-                {label}
+                {priorityLabel(value)}
               </option>
             ))}
           </select>
         </Row>
-        <Row label="Вопросы">
+        <Row label={t("view.questions")}>
           <select
             value={filters.questions}
             onChange={(e) => setFilter("questions", e.target.value as ViewFilters["questions"])}
             className={SELECT_CLASS}
           >
-            <option value="">неважно</option>
-            <option value="open">есть вопросы без ответа</option>
-            <option value="none">на все вопросы есть ответ</option>
+            <option value="">{t("view.any")}</option>
+            <option value="open">{t("view.questions.open")}</option>
+            <option value="none">{t("view.questions.none")}</option>
           </select>
         </Row>
-        <Row label="Зависимости">
+        <Row label={t("view.blocked")}>
           <select
             value={filters.blocked}
             onChange={(e) => setFilter("blocked", e.target.value as ViewFilters["blocked"])}
             className={SELECT_CLASS}
           >
-            <option value="">неважно</option>
-            <option value="blocked">ждут другие тикеты</option>
-            <option value="free">можно делать сейчас</option>
+            <option value="">{t("view.any")}</option>
+            <option value="blocked">{t("view.blocked.blocked")}</option>
+            <option value="free">{t("view.blocked.free")}</option>
           </select>
         </Row>
-        <Row label="Срок">
+        <Row label={t("view.due")}>
           <select
             value={filters.due}
             onChange={(e) => setFilter("due", e.target.value as ViewFilters["due"])}
             className={SELECT_CLASS}
           >
-            <option value="">неважно</option>
-            <option value="overdue">срок уже прошёл</option>
-            <option value="has">срок назначен</option>
-            <option value="none">срок не назначен</option>
+            <option value="">{t("view.any")}</option>
+            <option value="overdue">{t("view.due.overdue")}</option>
+            <option value="has">{t("view.due.has")}</option>
+            <option value="none">{t("view.due.none")}</option>
           </select>
         </Row>
-        <Row label="Команда">
+        <Row label={t("view.team")}>
           <select value={filters.team} onChange={(e) => setFilter("team", e.target.value)} className={SELECT_CLASS}>
-            <option value="">любая</option>
+            <option value="">{t("view.anyTeam")}</option>
             {teams.map((team) => (
               <option key={team.id} value={team.id}>
                 {team.name}
@@ -158,15 +156,15 @@ export default function ViewMenu({
             ))}
           </select>
         </Row>
-        <Row label="Подзадачи">
+        <Row label={t("view.subtasks")}>
           <select
             value={filters.subtasks}
             onChange={(e) => setFilter("subtasks", e.target.value as ViewFilters["subtasks"])}
             className={SELECT_CLASS}
           >
-            <option value="">неважно</option>
-            <option value="open">есть невыполненные</option>
-            <option value="none">подзадач нет</option>
+            <option value="">{t("view.any")}</option>
+            <option value="open">{t("view.subtasks.open")}</option>
+            <option value="none">{t("view.subtasks.none")}</option>
           </select>
         </Row>
         <button
@@ -174,37 +172,37 @@ export default function ViewMenu({
           onClick={onResetFilters}
           className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
         >
-          Сбросить все фильтры
+          {t("view.resetFilters")}
         </button>
       </section>
 
       <section className="space-y-2 border-t border-slate-800 pt-3">
-        <h3 className={SECTION_TITLE}>Порядок в колонках</h3>
-        <Row label="Сортировать по">
+        <h3 className={SECTION_TITLE}>{t("view.sortTitle")}</h3>
+        <Row label={t("view.sortBy")}>
           <select
             value={sort.key}
             onChange={(e) => onSortChange({ ...sort, key: e.target.value as SortKey })}
             className={SELECT_CLASS}
           >
-            {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+            {SORT_KEYS.map((key) => (
               <option key={key} value={key}>
-                {SORT_LABELS[key]}
+                {sortLabel(key)}
               </option>
             ))}
           </select>
         </Row>
         <Check checked={sort.desc} onChange={(desc) => onSortChange({ ...sort, desc })}>
-          В обратном порядке
+          {t("view.reverse")}
         </Check>
       </section>
 
       <section className="space-y-2 border-t border-slate-800 pt-3">
-        <h3 className={SECTION_TITLE}>Что видно на карточке</h3>
+        <h3 className={SECTION_TITLE}>{t("view.cardTitle")}</h3>
         <Check checked={display.showTags} onChange={(showTags) => onDisplayChange({ ...display, showTags })}>
-          Теги
+          {t("view.tags")}
         </Check>
         {fieldNames.length === 0 ? (
-          <p className="text-xs text-slate-600">У тикетов пока нет дополнительных полей</p>
+          <p className="text-xs text-slate-600">{t("view.noFields")}</p>
         ) : (
           <div className="space-y-1.5">
             {fieldNames.map((name) => (
@@ -227,7 +225,7 @@ export default function ViewMenu({
           onClick={() => onDisplayChange(DEFAULT_DISPLAY)}
           className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
         >
-          Вернуть как было
+          {t("view.resetDisplay")}
         </button>
       </section>
     </div>

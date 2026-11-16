@@ -1,0 +1,37 @@
+// Доска: шапка, колонки, карточки.
+export default {
+  "board.newTicket": "Новый тикет",
+  "board.projectHint": "Какой проект показать на доске",
+  "board.allProjects": "Все проекты",
+  "board.search": "Найти тикет…",
+  "board.searchHint": "Ищет по номеру, названию и описанию",
+  "board.filters": "Фильтры",
+  "board.filtersAria": "Фильтры и сортировка",
+  "board.filtersHint": "Фильтры, порядок тикетов и что показывать на карточках",
+  "board.moreActions": "Другие действия",
+  "board.bulkEdit": "Изменить несколько тикетов…",
+  "board.bulkEditHint": "Статус, важность, тег или поле — сразу у всех подходящих",
+  "board.collapseEmpty": "Свернуть пустые колонки",
+  "board.collapseEmptyHint": "Колонки, в которых нет ни одного тикета",
+  "board.loading": "Загружаю доску…",
+
+  "board.field.tag": "С тегом",
+  "board.field.class": "Класс",
+  "board.field.stage": "Стадия",
+  "board.anyTag": "любым",
+  "board.anyValue": "любой",
+
+  "board.addToColumn": "Добавить тикет в эту колонку",
+  "board.collapseColumn": "Свернуть колонку",
+  "board.expandColumn": "Развернуть колонку",
+  "board.expandColumnNamed": "Развернуть колонку «{name}»",
+  "board.dropHere": "Перетащите тикет сюда",
+  "board.liveCount": "· живых: {count}",
+
+  "board.openQuestions": "Вопросов без ответа: {count}",
+  "board.blockedHint": "Ждёт завершения этих тикетов",
+  "board.blockedBy": "ждёт: {keys}",
+  "board.live.running": "ИДЁТ",
+  "board.live.done": "ГОТОВО",
+  "board.live.error": "ОШИБКА",
+};

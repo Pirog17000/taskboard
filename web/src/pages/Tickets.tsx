@@ -13,8 +13,9 @@ import {
 import { api, type Ticket, type TicketInput, type Project, type Team } from "../api/client";
 import TicketPanel from "../components/TicketPanel";
 import CreateTicketModal from "../components/CreateTicketModal";
-import { STATUSES, STATUS_LABELS, STATUS_STYLES } from "../lib/statuses";
-import { allTags, groupByTag, tagNames } from "../lib/tags";
+import { STATUSES, statusLabel, priorityLabel, STATUS_STYLES } from "../lib/statuses";
+import { t, formatDate } from "../lib/i18n";
+import { allTags, groupByTag, tagNames, tagLabel } from "../lib/tags";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
@@ -28,11 +29,11 @@ const PRIORITY_CONFIG: Record<string, { style: string; icon: typeof ArrowUp }> =
 function StatusBadge({ status }: { status: string }) {
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium capitalize ${
+      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
         STATUS_STYLES[status] || "bg-slate-700 text-slate-300"
       }`}
     >
-      {STATUS_LABELS[status] || status}
+      {statusLabel(status)}
     </span>
   );
 }
@@ -43,10 +44,10 @@ function PriorityBadge({ priority }: { priority: string }) {
   const Icon = config.icon;
   return (
     <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium capitalize ${config.style}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${config.style}`}
     >
       <Icon className="w-3 h-3" />
-      {priority}
+      {priorityLabel(priority)}
     </span>
   );
 }
@@ -67,12 +68,12 @@ export default function Tickets() {
 
   const load = useCallback(async () => {
     try {
-      const [t, p, tm] = await Promise.all([
+      const [tk, p, tm] = await Promise.all([
         api.tickets.list(),
         api.projects.list(),
         api.teams.list(),
       ]);
-      setTickets(t || []);
+      setTickets(tk || []);
       setProjects(p || []);
       setTeams(tm || []);
     } catch {
@@ -87,11 +88,11 @@ export default function Tickets() {
     load();
   }, [load]);
 
-  const filtered = tickets.filter((t) => {
-    if (filterProject && t.projectId !== filterProject) return false;
-    if (filterStatus && t.status !== filterStatus) return false;
-    if (filterPriority && t.priority !== filterPriority) return false;
-    if (filterTag && !tagNames(t).includes(filterTag)) return false;
+  const filtered = tickets.filter((tk) => {
+    if (filterProject && tk.projectId !== filterProject) return false;
+    if (filterStatus && tk.status !== filterStatus) return false;
+    if (filterPriority && tk.priority !== filterPriority) return false;
+    if (filterTag && !tagNames(tk).includes(filterTag)) return false;
     return true;
   });
 
@@ -118,11 +119,11 @@ export default function Tickets() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800 text-xs text-slate-500 uppercase tracking-wider">
-                <th className="text-left px-6 py-3 font-medium">Key</th>
-                <th className="text-left px-6 py-3 font-medium">Title</th>
-                <th className="text-left px-6 py-3 font-medium">Status</th>
-                <th className="text-left px-6 py-3 font-medium">Priority</th>
-                <th className="text-left px-6 py-3 font-medium">Due</th>
+                <th className="text-left px-6 py-3 font-medium">{t("pages.tickets.colKey")}</th>
+                <th className="text-left px-6 py-3 font-medium">{t("pages.tickets.colTitle")}</th>
+                <th className="text-left px-6 py-3 font-medium">{t("pages.tickets.colStatus")}</th>
+                <th className="text-left px-6 py-3 font-medium">{t("pages.tickets.colPriority")}</th>
+                <th className="text-left px-6 py-3 font-medium">{t("pages.tickets.colDue")}</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -153,7 +154,7 @@ export default function Tickets() {
                     {ticket.dueDate ? (
                       <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                         <Calendar className="w-3 h-3" />
-                        {new Date(ticket.dueDate).toLocaleDateString()}
+                        {formatDate(ticket.dueDate)}
                       </span>
                     ) : (
                       <span className="text-xs text-slate-700">—</span>
@@ -171,13 +172,13 @@ export default function Tickets() {
   return (
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
-        <h1 className="text-lg font-semibold text-white">Tickets</h1>
+        <h1 className="text-lg font-semibold text-white">{t("pages.tickets.title")}</h1>
         <button
           onClick={() => setShowCreate(true)}
           className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
-          New Ticket
+          {t("pages.tickets.new")}
         </button>
       </header>
 
@@ -187,7 +188,7 @@ export default function Tickets() {
           onChange={(e) => setFilterProject(e.target.value)}
           className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="">All Projects</option>
+          <option value="">{t("pages.tickets.allProjects")}</option>
           {projects.map((p) => (
             <option key={p.id} value={p.id}>
               {p.icon} {p.name}
@@ -199,10 +200,10 @@ export default function Tickets() {
           onChange={(e) => setFilterStatus(e.target.value)}
           className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="">All Statuses</option>
+          <option value="">{t("pages.tickets.allStatuses")}</option>
           {STATUSES.map((s) => (
             <option key={s} value={s}>
-              {STATUS_LABELS[s]}
+              {statusLabel(s)}
             </option>
           ))}
         </select>
@@ -211,10 +212,10 @@ export default function Tickets() {
           onChange={(e) => setFilterPriority(e.target.value)}
           className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
         >
-          <option value="">All Priorities</option>
+          <option value="">{t("pages.tickets.allPriorities")}</option>
           {PRIORITIES.map((p) => (
-            <option key={p} value={p} className="capitalize">
-              {p}
+            <option key={p} value={p}>
+              {priorityLabel(p)}
             </option>
           ))}
         </select>
@@ -223,7 +224,7 @@ export default function Tickets() {
           onChange={(e) => setFilterTag(e.target.value)}
           className="bg-slate-800 text-xs text-slate-300 rounded-md border border-slate-700 px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
-          <option value="">All Tags</option>
+          <option value="">{t("pages.tickets.allTags")}</option>
           {tagOptions.map((tag) => (
             <option key={tag} value={tag}>
               {tag}
@@ -237,29 +238,29 @@ export default function Tickets() {
             onChange={(e) => setGroupByTags(e.target.checked)}
             className="accent-blue-500"
           />
-          Group by tag
+          {t("pages.tickets.groupByTag")}
         </label>
         <span className="text-xs text-slate-600 ml-auto">
-          {filtered.length} ticket{filtered.length !== 1 ? "s" : ""}
+          {t("pages.tickets.count", { count: filtered.length })}
         </span>
       </div>
 
       <div className="flex-1 overflow-auto">
         {loading ? (
           <div className="flex items-center justify-center h-64 text-slate-600">
-            Loading tickets…
+            {t("pages.tickets.loading")}
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-600 space-y-3">
             <TicketIcon className="w-10 h-10 text-slate-700" />
-            <p className="text-sm">No tickets found</p>
+            <p className="text-sm">{t("pages.tickets.empty")}</p>
           </div>
         ) : (
           groupByTags ? groups.map((g) => (
             <section key={g.tag}>
               <h2 className="px-6 pt-5 pb-2 text-xs font-semibold text-slate-300 flex items-center gap-2">
                 <TagIcon className="w-3.5 h-3.5 text-slate-500" />
-                {g.tag}
+                {tagLabel(g.tag)}
                 <span className="text-slate-600 font-normal">{g.tickets.length}</span>
               </h2>
               {renderTable(g.tickets)}

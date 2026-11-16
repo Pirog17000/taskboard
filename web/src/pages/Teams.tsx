@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, X, Users } from "lucide-react";
 import { api, type Team } from "../api/client";
+import { t, formatDate } from "../lib/i18n";
 
 const TEAM_COLORS = [
   "#3b82f6",
@@ -40,7 +41,7 @@ function TeamModal({
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">
-            {isEdit ? "Edit Team" : "New Team"}
+            {isEdit ? t("pages.teams.editTitle") : t("pages.teams.newTitle")}
           </h2>
           <button
             type="button"
@@ -54,12 +55,12 @@ function TeamModal({
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Name
+              {t("pages.teams.name")}
             </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Engineering"
+              placeholder={t("pages.teams.namePlaceholder")}
               required
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
@@ -67,7 +68,7 @@ function TeamModal({
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Color
+              {t("pages.color")}
             </label>
             <div className="flex gap-2">
               {TEAM_COLORS.map((c) => (
@@ -93,13 +94,13 @@ function TeamModal({
             onClick={onClose}
             className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
           >
-            {isEdit ? "Save Changes" : "Create Team"}
+            {isEdit ? t("pages.saveChanges") : t("pages.teams.create")}
           </button>
         </div>
       </form>
@@ -148,25 +149,25 @@ export default function Teams() {
   return (
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
-        <h1 className="text-lg font-semibold text-white">Teams</h1>
+        <h1 className="text-lg font-semibold text-white">{t("pages.teams.title")}</h1>
         <button
           onClick={() => setShowCreate(true)}
           className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
-          New Team
+          {t("pages.teams.new")}
         </button>
       </header>
 
       <div className="flex-1 overflow-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center h-64 text-slate-600">
-            Loading teams…
+            {t("pages.teams.loading")}
           </div>
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-600 space-y-3">
             <Users className="w-10 h-10 text-slate-700" />
-            <p className="text-sm">No teams yet</p>
+            <p className="text-sm">{t("pages.teams.empty")}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -201,7 +202,7 @@ export default function Teams() {
                   {team.name}
                 </h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  Created {new Date(team.createdAt).toLocaleDateString()}
+                  {t("pages.teams.created", { date: formatDate(team.createdAt) })}
                 </p>
               </div>
             ))}

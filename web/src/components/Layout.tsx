@@ -5,19 +5,18 @@ import {
   FolderKanban,
   Users,
   Ticket,
-  Zap,
-  TerminalSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
 } from "lucide-react";
-import TerminalPanel from "./TerminalPanel";
+import { t, useLang, type TKey } from "../lib/i18n";
 
-const navItems = [
+const navItems: { to: string; icon: typeof LayoutDashboard; labelKey: TKey }[] = [
   // По частоте использования: доска и список тикетов — каждый день, проекты и команды — при настройке.
-  { to: "/", icon: LayoutDashboard, label: "Доска" },
-  { to: "/tickets", icon: Ticket, label: "Список тикетов" },
-  { to: "/projects", icon: FolderKanban, label: "Проекты" },
-  { to: "/teams", icon: Users, label: "Команды" },
+  { to: "/", icon: LayoutDashboard, labelKey: "nav.board" },
+  { to: "/tickets", icon: Ticket, labelKey: "nav.tickets" },
+  { to: "/projects", icon: FolderKanban, labelKey: "nav.projects" },
+  { to: "/teams", icon: Users, labelKey: "nav.teams" },
 ];
 
 // Ключ localStorage, в котором хранится свёрнутость боковой панели между сессиями.
@@ -25,7 +24,7 @@ const SIDEBAR_KEY = "taskboard.sidebarCollapsed";
 const NARROW_QUERY = "(max-width: 767px)";
 
 export default function Layout() {
-  const [terminalOpen, setTerminalOpen] = useState(false);
+  const lang = useLang();
   // Свёрнутость на широком экране запоминается между сессиями
   const [wideCollapsed, setWideCollapsed] = useState(
     () => localStorage.getItem(SIDEBAR_KEY) === "1",
@@ -83,7 +82,7 @@ export default function Layout() {
         >
           {!collapsed && (
             <>
-              <Zap className="w-5 h-5 text-blue-400" />
+              <img src="/favicon.svg" alt="" className="w-5 h-5" />
               <span className="flex-1 text-sm font-semibold tracking-wide text-white">
                 Taskboard
               </span>
@@ -91,8 +90,8 @@ export default function Layout() {
           )}
           <button
             onClick={toggleSidebar}
-            title={collapsed ? "Развернуть меню" : "Свернуть меню"}
-            aria-label={collapsed ? "Развернуть меню" : "Свернуть меню"}
+            title={collapsed ? t("nav.expand") : t("nav.collapse")}
+            aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
             className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
           >
             {collapsed ? (
@@ -109,48 +108,42 @@ export default function Layout() {
               key={item.to}
               to={item.to}
               end={item.to === "/"}
-              title={collapsed ? item.label : undefined}
+              title={collapsed ? t(item.labelKey) : undefined}
               onClick={closeOverlay}
               className={({ isActive }) => itemClass(isActive)}
             >
               <item.icon className="w-4 h-4 shrink-0" />
-              {!collapsed && item.label}
+              {!collapsed && t(item.labelKey)}
             </NavLink>
           ))}
         </nav>
 
+        {/* Редкое — внизу: настройки */}
         <div className="px-2.5 pb-2">
-          <button
-            onClick={() => {
-              closeOverlay();
-              setTerminalOpen((v) => !v);
-            }}
-            title="Открыть или закрыть терминал внизу экрана"
-            className={`${itemClass(terminalOpen)} w-full`}
+          <NavLink
+            to="/settings"
+            title={collapsed ? t("nav.settings") : undefined}
+            onClick={closeOverlay}
+            className={({ isActive }) => itemClass(isActive)}
           >
-            <TerminalSquare className="w-4 h-4 shrink-0" />
-            {!collapsed && "Терминал"}
-          </button>
+            <Settings className="w-4 h-4 shrink-0" />
+            {!collapsed && t("nav.settings")}
+          </NavLink>
         </div>
 
         {!collapsed && (
           <div className="px-5 py-3 border-t border-slate-800">
             <p className="text-[10px] text-slate-600 tracking-wider uppercase">
-              Версия 0.6.0
+              {t("nav.version", { version: "0.6.0" })}
             </p>
           </div>
         )}
       </aside>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <main className="flex-1 overflow-auto bg-slate-950">
-          <Outlet />
-        </main>
-        <TerminalPanel
-          isOpen={terminalOpen}
-          onClose={() => setTerminalOpen(false)}
-        />
-      </div>
+      {/* key={lang}: при смене языка страница пересоздаётся и перечитывает все подписи */}
+      <main key={lang} className="flex-1 overflow-auto bg-slate-950">
+        <Outlet />
+      </main>
     </div>
   );
 }

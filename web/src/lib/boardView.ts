@@ -1,4 +1,5 @@
-﻿import type { Ticket, TicketInput } from "../api/client";
+import type { Ticket, TicketInput } from "../api/client";
+import { t, type TKey } from "./i18n";
 import { CARD_FIELDS } from "./fields";
 import { tagNames } from "./tags";
 
@@ -8,16 +9,12 @@ export const PRIORITY_ORDER = ["urgent", "high", "medium", "low"];
 
 export type SortKey = "manual" | "priority" | "due" | "updated" | "created" | "number" | "title" | "questions";
 
-export const SORT_LABELS: Record<SortKey, string> = {
-  manual: "ручному порядку",
-  priority: "важности",
-  due: "сроку",
-  updated: "дате изменения",
-  created: "дате создания",
-  number: "номеру",
-  title: "названию",
-  questions: "числу вопросов без ответа",
-};
+export const SORT_KEYS: SortKey[] = ["manual", "priority", "due", "updated", "created", "number", "title", "questions"];
+
+// Подпись варианта сортировки на текущем языке
+export function sortLabel(key: SortKey): string {
+  return t(`view.sort.${key}` as TKey);
+}
 
 export interface ViewFilters {
   priority: string; // "" = любая

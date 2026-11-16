@@ -1,6 +1,13 @@
 import type { Ticket } from "../api/client";
+import { t as tr } from "./i18n";
 
+// Служебное значение: ключ секции для тикетов без тегов (не менять: может быть сохранено в localStorage).
 export const NO_TAG = "Без тега";
+
+// Подпись тега для показа пользователю
+export function tagLabel(tag: string): string {
+  return tag === NO_TAG ? tr("pages.tags.none") : tag;
+}
 
 // Имена тегов тикета.
 export function tagNames(ticket: Ticket): string[] {

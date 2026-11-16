@@ -2,6 +2,8 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import type { TicketInput, Project, Team } from "../api/client";
 import { parseTags } from "../lib/tags";
+import { priorityLabel } from "../lib/statuses";
+import { t } from "../lib/i18n";
 
 const PRIORITIES = ["urgent", "high", "medium", "low"];
 
@@ -48,7 +50,7 @@ export default function CreateTicketModal({
         className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-xl p-6 space-y-5"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-white">New Ticket</h2>
+          <h2 className="text-lg font-semibold text-white">{t("ticket.create.title")}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -61,7 +63,7 @@ export default function CreateTicketModal({
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Project
+              {t("ticket.create.project")}
             </label>
             <select
               value={projectId}
@@ -69,7 +71,7 @@ export default function CreateTicketModal({
               required
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="">Select project…</option>
+              <option value="">{t("ticket.create.selectProject")}</option>
               {projects.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.icon} {p.name}
@@ -80,12 +82,12 @@ export default function CreateTicketModal({
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Title
+              {t("ticket.create.titleLabel")}
             </label>
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="What needs to be done?"
+              placeholder={t("ticket.create.titlePlaceholder")}
               required
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
@@ -93,13 +95,13 @@ export default function CreateTicketModal({
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Description
+              {t("ticket.create.description")}
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              placeholder="Add more detail…"
+              placeholder={t("ticket.create.descriptionPlaceholder")}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
             />
           </div>
@@ -107,23 +109,23 @@ export default function CreateTicketModal({
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Priority
+                {t("ticket.create.priority")}
               </label>
               <select
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 {PRIORITIES.map((p) => (
                   <option key={p} value={p}>
-                    {p}
+                    {priorityLabel(p)}
                   </option>
                 ))}
               </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Due Date
+                {t("ticket.create.dueDate")}
               </label>
               <input
                 type="date"
@@ -134,17 +136,17 @@ export default function CreateTicketModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Team
+                {t("ticket.create.team")}
               </label>
               <select
                 value={teamId}
                 onChange={(e) => setTeamId(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
-                <option value="">None</option>
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
+                <option value="">{t("common.none")}</option>
+                {teams.map((tm) => (
+                  <option key={tm.id} value={tm.id}>
+                    {tm.name}
                   </option>
                 ))}
               </select>
@@ -154,7 +156,7 @@ export default function CreateTicketModal({
 
         <div>
             <label className="block text-xs font-medium text-slate-500 mb-1.5">
-              Tags
+              {t("ticket.create.tags")}
             </label>
             <input
               value={tags}
@@ -162,7 +164,7 @@ export default function CreateTicketModal({
                 setTags(e.target.value);
                 void 0;
               }}
-              placeholder="например: первая волна работ, этап-4 по плану 123"
+              placeholder={t("ticket.create.tagsPlaceholder")}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -172,13 +174,13 @@ export default function CreateTicketModal({
             onClick={onClose}
             className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
           >
-            Create Ticket
+            {t("ticket.create.submit")}
           </button>
         </div>
       </form>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, type Ticket } from "../api/client";
-import { STATUSES, STATUS_LABELS } from "../lib/statuses";
+import { STATUSES, statusLabel, priorityLabel } from "../lib/statuses";
+import { t } from "../lib/i18n";
 import { allTags } from "../lib/tags";
 import {
   PRIORITY_ORDER,
@@ -61,13 +62,6 @@ function buildOp(f: FormState): BulkOp {
   }
   return { source, target, removeSource: f.removeSource };
 }
-
-const PRIORITY_NAMES: Record<string, string> = {
-  urgent: "срочная",
-  high: "высокая",
-  medium: "средняя",
-  low: "низкая",
-};
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -131,7 +125,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
 
   const run = async () => {
     if (matching.length === 0 || running) return;
-    if (!window.confirm(`Изменить ${matching.length} тикетов? Это действие нельзя отменить одной кнопкой.`)) return;
+    if (!window.confirm(t("bulk.confirm", { count: matching.length }))) return;
 
     setRunning(true);
     setResult(null);
@@ -164,45 +158,45 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
     >
       <div className="w-full max-w-lg space-y-4 rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-xl">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">Изменить несколько тикетов</h2>
+          <h2 className="text-base font-semibold text-white">{t("bulk.title")}</h2>
           <button
             type="button"
             onClick={onClose}
             disabled={running}
             className="text-xs text-slate-500 hover:text-slate-300 disabled:opacity-40 transition-colors"
           >
-            Закрыть
+            {t("common.close")}
           </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-500">Быстрые шаблоны:</span>
+          <span className="text-xs text-slate-500">{t("bulk.presets")}</span>
           <button type="button" onClick={applyPresets.tagToPriority} className={PRESET_CLASS}>
-            тег → важность
+            {t("bulk.preset.tagToPriority")}
           </button>
           <button type="button" onClick={applyPresets.fieldToStatus} className={PRESET_CLASS}>
-            поле → статус
+            {t("bulk.preset.fieldToStatus")}
           </button>
           <button type="button" onClick={applyPresets.tagToField} className={PRESET_CLASS}>
-            тег → поле
+            {t("bulk.preset.tagToField")}
           </button>
           <button type="button" onClick={applyPresets.fieldToTag} className={PRESET_CLASS}>
-            поле → тег
+            {t("bulk.preset.fieldToTag")}
           </button>
         </div>
 
-        <Section title="Каким тикетам: у которых есть">
+        <Section title={t("bulk.which")}>
           <select
             value={form.srcKind}
             onChange={(e) => set("srcKind", e.target.value as SourceKind)}
             className={SELECT_CLASS}
           >
-            <option value="tag">тег</option>
-            <option value="field">поле</option>
+            <option value="tag">{t("bulk.src.tag")}</option>
+            <option value="field">{t("bulk.src.field")}</option>
           </select>
           {form.srcKind === "tag" ? (
             <select value={form.srcTag} onChange={(e) => set("srcTag", e.target.value)} className={SELECT_CLASS}>
-              <option value="">— какой тег —</option>
+              <option value="">{t("bulk.pickTag")}</option>
               {tagOptions.map((tag) => (
                 <option key={tag} value={tag}>
                   {tag}
@@ -216,7 +210,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
                 onChange={(e) => set("srcField", e.target.value)}
                 className={SELECT_CLASS}
               >
-                <option value="">— какое поле —</option>
+                <option value="">{t("bulk.pickField")}</option>
                 {fieldNames.map((name) => (
                   <option key={name} value={name}>
                     {name}
@@ -226,29 +220,29 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
               <input
                 value={form.srcValue}
                 onChange={(e) => set("srcValue", e.target.value)}
-                placeholder="с любым значением"
+                placeholder={t("bulk.anyValue")}
                 className={`${INPUT_CLASS} w-36`}
               />
             </>
           )}
         </Section>
 
-        <Section title="Что поменять">
+        <Section title={t("bulk.what")}>
           <select
             value={form.tgtKind}
             onChange={(e) => set("tgtKind", e.target.value as TargetKind)}
             className={SELECT_CLASS}
           >
-            <option value="status">статус на</option>
-            <option value="priority">важность на</option>
-            <option value="tag">добавить тег</option>
-            <option value="field">заполнить поле</option>
+            <option value="status">{t("bulk.tgt.status")}</option>
+            <option value="priority">{t("bulk.tgt.priority")}</option>
+            <option value="tag">{t("bulk.tgt.tag")}</option>
+            <option value="field">{t("bulk.tgt.field")}</option>
           </select>
           {form.tgtKind === "status" && (
             <select value={form.tgtStatus} onChange={(e) => set("tgtStatus", e.target.value)} className={SELECT_CLASS}>
               {STATUSES.map((status) => (
                 <option key={status} value={status}>
-                  {STATUS_LABELS[status]}
+                  {statusLabel(status)}
                 </option>
               ))}
             </select>
@@ -257,7 +251,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
             <select value={form.tgtPriority} onChange={(e) => set("tgtPriority", e.target.value)} className={SELECT_CLASS}>
               {PRIORITY_ORDER.map((priority) => (
                 <option key={priority} value={priority}>
-                  {PRIORITY_NAMES[priority] ?? priority}
+                  {priorityLabel(priority)}
                 </option>
               ))}
             </select>
@@ -266,7 +260,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
             <input
               value={form.tgtTag}
               onChange={(e) => set("tgtTag", e.target.value)}
-              placeholder="тег (если пусто — возьмётся значение поля)"
+              placeholder={t("bulk.tagPlaceholder")}
               className={`${INPUT_CLASS} w-64`}
             />
           )}
@@ -275,7 +269,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
               <input
                 value={form.tgtField}
                 onChange={(e) => set("tgtField", e.target.value)}
-                placeholder="какое поле"
+                placeholder={t("bulk.fieldPlaceholder")}
                 list={fieldListId}
                 className={`${INPUT_CLASS} w-32`}
               />
@@ -287,7 +281,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
               <input
                 value={form.tgtValue}
                 onChange={(e) => set("tgtValue", e.target.value)}
-                placeholder="значение (если пусто — возьмётся тег)"
+                placeholder={t("bulk.valuePlaceholder")}
                 className={`${INPUT_CLASS} w-44`}
               />
             </>
@@ -301,21 +295,21 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
             onChange={(e) => set("removeSource", e.target.checked)}
             className="accent-blue-500"
           />
-          Убрать исходный тег или поле после изменения
+          {t("bulk.removeSource")}
         </label>
 
         <div className="rounded-md border border-slate-800 bg-slate-950/40 px-3 py-2 text-xs text-slate-400">
-          Подходят {matching.length} из {tickets.length} тикетов на доске
+          {t("bulk.matching", { count: matching.length, total: tickets.length })}
         </div>
 
         {running && (
           <div className="text-xs text-slate-400 tabular-nums">
-            Изменено {progress} из {matching.length}…
+            {t("bulk.progress", { done: progress, count: matching.length })}
           </div>
         )}
         {result && (
           <div className="text-xs text-slate-300 tabular-nums">
-            Готово: изменено {result.changed}, не получилось {result.errors}
+            {t("bulk.result", { changed: result.changed, errors: result.errors })}
           </div>
         )}
 
@@ -326,7 +320,7 @@ export default function BulkMenu({ tickets, allTickets, onClose, onDone }: BulkM
             disabled={matching.length === 0 || running}
             className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Изменить {matching.length} тикетов
+            {t("bulk.apply", { count: matching.length })}
           </button>
         </div>
       </div>

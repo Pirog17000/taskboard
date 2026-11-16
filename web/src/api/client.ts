@@ -1,3 +1,5 @@
+import { t } from "../lib/i18n";
+
 export interface Project {
   id: string;
   name: string;
@@ -101,7 +103,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
+    throw new Error(t("pages.api.error", { status: res.status, text }));
   }
   if (res.status === 204) return undefined as T;
   return res.json();

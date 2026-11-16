@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Plus, Trash2, X, FolderKanban, ChevronDown, ChevronUp } from "lucide-react";
 import Markdown from "react-markdown";
 import { api, type Project } from "../api/client";
+import { t } from "../lib/i18n";
 
 const DEFAULT_COLORS = [
   "#3b82f6",
@@ -45,7 +46,7 @@ function ProjectModal({
       >
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">
-            {isEdit ? "Edit Project" : "New Project"}
+            {isEdit ? t("pages.projects.editTitle") : t("pages.projects.newTitle")}
           </h2>
           <button
             type="button"
@@ -59,12 +60,12 @@ function ProjectModal({
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Name
+              {t("pages.projects.name")}
             </label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My Project"
+              placeholder={t("pages.projects.namePlaceholder")}
               required
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
@@ -73,7 +74,7 @@ function ProjectModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Prefix
+                {t("pages.projects.prefix")}
               </label>
               <input
                 value={prefix}
@@ -86,7 +87,7 @@ function ProjectModal({
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Icon
+                {t("pages.projects.icon")}
               </label>
               <input
                 value={icon}
@@ -98,12 +99,12 @@ function ProjectModal({
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Description
+              {t("pages.projects.description")}
             </label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Supports markdown — goals, scope, and context for this project…"
+              placeholder={t("pages.projects.descriptionPlaceholder")}
               rows={12}
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-y font-mono"
             />
@@ -112,22 +113,22 @@ function ProjectModal({
           {isEdit && (
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                Status
+                {t("pages.projects.status")}
               </label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value)}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blue-500 capitalize"
               >
-                <option value="active">Active</option>
-                <option value="archived">Archived</option>
+                <option value="active">{t("pages.projects.statusActive")}</option>
+                <option value="archived">{t("pages.projects.statusArchived")}</option>
               </select>
             </div>
           )}
 
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1.5">
-              Color
+              {t("pages.color")}
             </label>
             <div className="flex gap-2">
               {DEFAULT_COLORS.map((c) => (
@@ -153,13 +154,13 @@ function ProjectModal({
             onClick={onClose}
             className="px-4 py-2 text-sm text-slate-400 hover:text-white transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="submit"
             className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
           >
-            {isEdit ? "Save Changes" : "Create Project"}
+            {isEdit ? t("pages.saveChanges") : t("pages.projects.create")}
           </button>
         </div>
       </form>
@@ -218,25 +219,25 @@ export default function Projects() {
   return (
     <div className="h-full flex flex-col">
       <header className="shrink-0 flex items-center justify-between px-6 h-14 border-b border-slate-800">
-        <h1 className="text-lg font-semibold text-white">Projects</h1>
+        <h1 className="text-lg font-semibold text-white">{t("pages.projects.title")}</h1>
         <button
           onClick={() => setShowCreate(true)}
           className="inline-flex items-center gap-2 px-3.5 py-1.5 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
-          New Project
+          {t("pages.projects.new")}
         </button>
       </header>
 
       <div className="flex-1 overflow-auto p-6">
         {loading ? (
           <div className="flex items-center justify-center h-64 text-slate-600">
-            Loading projects…
+            {t("pages.projects.loading")}
           </div>
         ) : projects.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-600 space-y-3">
             <FolderKanban className="w-10 h-10 text-slate-700" />
-            <p className="text-sm">No projects yet</p>
+            <p className="text-sm">{t("pages.projects.empty")}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -283,11 +284,11 @@ export default function Projects() {
                     >
                       {expandedDescs.has(project.id) ? (
                         <>
-                          Show less <ChevronUp className="w-3 h-3" />
+                          {t("pages.projects.showLess")} <ChevronUp className="w-3 h-3" />
                         </>
                       ) : (
                         <>
-                          Show more <ChevronDown className="w-3 h-3" />
+                          {t("pages.projects.showMore")} <ChevronDown className="w-3 h-3" />
                         </>
                       )}
                     </button>
@@ -301,8 +302,8 @@ export default function Projects() {
                     className="inline-block w-1.5 h-1.5 rounded-full"
                     style={{ backgroundColor: project.color }}
                   />
-                  <span className="text-xs text-slate-500 capitalize">
-                    {project.status}
+                  <span className="text-xs text-slate-500">
+                    {project.status === "active" ? t("pages.projects.statusActive") : project.status === "archived" ? t("pages.projects.statusArchived") : project.status}
                   </span>
                 </div>
               </div>
