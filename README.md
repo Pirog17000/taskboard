@@ -19,34 +19,31 @@ Single binary. SQLite-backed. No Docker, no external database, no runtime depend
 - **CLI** — manage everything from the terminal
 - **MCP Server** — 32 tools for AI-native project management via Model Context Protocol
 - **Self-Hosted** — your data stays on your machine in a SQLite database
-- **Single Binary** — `brew install` on macOS/Linux, or build one `taskboard.exe` on Windows
+- **Single Binary** — download one file for macOS, Linux or Windows, or build from source
 - **Cross-platform** — macOS, Linux, and Windows
 
 ## Install
 
-### Homebrew
+### Download a release
 
-```bash
-brew tap tcarac/taskboard
-brew install taskboard
-```
+Ready-made builds for Windows, macOS and Linux (amd64 and arm64) are on the [Releases page](https://github.com/Pirog17000/taskboard/releases). Unpack the archive and run `taskboard start` (`taskboard.exe start` on Windows). Checksums are in `SHA256SUMS.txt`.
 
 ### From source
 
 ```bash
-git clone https://github.com/tcarac/taskboard.git
+git clone https://github.com/Pirog17000/taskboard.git
 cd taskboard
 make build
 ```
 
 Requires Go 1.24+ and Node.js 22+.
 
-### Windows
+### Windows from source
 
-Homebrew is not available. Build from source in PowerShell (or use `make build` from Git Bash/MSYS2 if you have `make`):
+Build in PowerShell (or use `make build` from Git Bash/MSYS2 if you have `make`):
 
 ```powershell
-git clone https://github.com/tcarac/taskboard.git
+git clone https://github.com/Pirog17000/taskboard.git
 cd taskboard
 
 # frontend
@@ -56,11 +53,11 @@ npm run build
 cd ..
 
 # embed the frontend into the binary
-New-Item -ItemType Directory -Force cmd	askboard\web\dist | Out-Null
-Copy-Item -Recurse -Force web\dist\* cmd	askboard\web\dist
+New-Item -ItemType Directory -Force cmd\taskboard\web\dist | Out-Null
+Copy-Item -Recurse -Force web\dist\* cmd\taskboard\web\dist
 # backend
-go build -o taskboard.exe .\cmd	askboard
-.	askboard.exe start
+go build -o taskboard.exe .\cmd\taskboard
+.\taskboard.exe start
 ```
 
 On Windows the web UI, CLI, MCP server, and `start`/`stop` all work.
@@ -230,7 +227,7 @@ All data is stored in a SQLite database at:
 
 - **macOS**: `~/Library/Application Support/taskboard/taskboard.db`
 - **Linux**: `~/.config/taskboard/taskboard.db`
-- **Windows**: `%AppData%	askboard	askboard.db`
+- **Windows**: `%AppData%\taskboard\taskboard.db`
 
 Migrations run automatically on first start.
 
