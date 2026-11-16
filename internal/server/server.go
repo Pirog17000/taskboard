@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/go-chi/chi/v5"
@@ -38,7 +39,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ListenAndServe(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Taskboard running at http://localhost:%d\n", port)
+	go s.sweepLiveLoop()
 	return http.ListenAndServe(addr, s.router)
+}
+
+// sweepLiveLoop deletes expired live cards every few seconds.
+func (s *Server) sweepLiveLoop() {
+	for range time.Tick(5 * time.Second) {
+		s.store.SweepExpiredLive()
+	}
 }
 
 func (s *Server) setupRoutes(webFS fs.FS) {
@@ -102,6 +111,9 @@ func (s *Server) setupRoutes(webFS fs.FS) {
 			r.Put("/{id}", s.updateLabel)
 			r.Delete("/{id}", s.deleteLabel)
 		})
+
+		r.Put("/live", s.upsertLive)
+		r.Delete("/live", s.removeLive)
 
 		r.Get("/board", s.getBoard)
 		r.Get("/terminal/ws", s.handleTerminalWS)
@@ -281,6 +293,8 @@ func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
 		Status:    r.URL.Query().Get("status"),
 		Priority:  r.URL.Query().Get("priority"),
 		Label:     r.URL.Query().Get("label"),
+
+		IncludeLive: r.URL.Query().Get("includeLive") == "true",
 	}
 	tickets, err := s.store.ListTickets(filter)
 	if err != nil {
@@ -361,7 +375,7 @@ func (s *Server) moveTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t, err := s.store.MoveTicket(chi.URLParam(r, "id"), req)
-	if errors.Is(err, db.ErrInvalidStatus) {
+	if errors.Is(err, db.ErrInvalidStatus) || errors.Is(err, db.ErrLiveCard) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -673,10 +687,41 @@ func (s *Server) deleteLabel(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// upsertLive creates or updates a live card by (projectId, liveId).
+func (s *Server) upsertLive(w http.ResponseWriter, r *http.Request) {
+	var req models.UpsertLiveRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	t, err := s.store.UpsertLiveCard(req)
+	if errors.Is(err, db.ErrInvalidLive) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+// removeLive deletes a live card; the card is addressed by ?projectId= and ?liveId=.
+func (s *Server) removeLive(w http.ResponseWriter, r *http.Request) {
+	deleted, err := s.store.RemoveLiveCard(r.URL.Query().Get("projectId"), r.URL.Query().Get("liveId"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"deleted": deleted})
+}
+
 func (s *Server) getBoard(w http.ResponseWriter, r *http.Request) {
 	board, err := s.store.GetBoard(models.TicketFilter{
 		ProjectID: r.URL.Query().Get("projectId"),
 		Label:     r.URL.Query().Get("label"),
+
+		IncludeLive: true,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

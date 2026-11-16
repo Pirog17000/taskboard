@@ -214,7 +214,15 @@ type ticketAck struct {
 	QuestionsTotal  int               `json:"questionsTotal,omitempty"`
 }
 
-const ackNote = "Returns a short acknowledgement: key, title, status, tag names, fields, blockedByKeys, openBlockerKeys, links, subtask counts and question counts (questionsOpen/questionsTotal) (use get_ticket for the description)."
+// liveAck — короткий ответ upsert_live_card.
+type liveAck struct {
+	Key      string `json:"key"`
+	LiveID   string `json:"liveId"`
+	Progress int    `json:"progress"`
+	State    string `json:"state"`
+}
+
+const ackNote ="Returns a short acknowledgement: key, title, status, tag names, fields, blockedByKeys, openBlockerKeys, links, subtask counts and question counts (questionsOpen/questionsTotal) (use get_ticket for the description)."
 
 func (s *MCPServer) ack(id string) (any, error) {
 	t, err := s.store.GetTicketCompact(id)
@@ -321,6 +329,15 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		var a models.TicketFilter
 		json.Unmarshal(args, &a)
 		return s.store.ListTickets(a)
+
+	case "tag_overview":
+		return s.tagOverview(args)
+
+	case "tags_overview":
+		return s.tagsOverview(args)
+
+	case "ticket_sections":
+		return s.ticketSections(args)
 
 	case "get_ticket":
 		var a struct {
@@ -659,6 +676,27 @@ func (s *MCPServer) callTool(name string, args json.RawMessage) (any, error) {
 		json.Unmarshal(args, &a)
 		return map[string]bool{"deleted": true}, s.store.DeleteQuestion(a.ID)
 
+	case "upsert_live_card":
+		var a models.UpsertLiveRequest
+		json.Unmarshal(args, &a)
+		t, err := s.store.UpsertLiveCard(a)
+		if err != nil {
+			return nil, err
+		}
+		return liveAck{Key: t.DisplayKey(), LiveID: t.LiveID, Progress: t.Progress, State: t.LiveState}, nil
+
+	case "remove_live_card":
+		var a struct {
+			ProjectID string `json:"projectId"`
+			LiveID    string `json:"liveId"`
+		}
+		json.Unmarshal(args, &a)
+		if a.ProjectID == "" || a.LiveID == "" {
+			return nil, fmt.Errorf("projectId and liveId are required")
+		}
+		deleted, err := s.store.RemoveLiveCard(a.ProjectID, a.LiveID)
+		return map[string]bool{"deleted": deleted}, err
+
 	default:
 		return nil, fmt.Errorf("unknown tool: %s", name)
 	}
@@ -824,7 +862,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Tickets (tasks within a project) ---
 		{
 			Name: "list_tickets",
-			Description: "List tickets with optional filters by project, team, status, priority, tag, text search, custom field and readiness. " +
+			Description: "List tickets with full data (description, subtasks, questions, fields, links): can be very large. For a short view of one tag use tag_overview; for one section (task text, questions, fields) use ticket_sections. " +
+					"Filter label = a tag name (e.g. W01:Lamps); search does NOT look at tags, it matches key, title and description only. " +
+					"Filters: project, team, status, priority, tag, text search, custom field and readiness. " +
 				"Each ticket shows blockedBy (IDs), blockedByKeys (e.g. \"UE-80\"), openBlockers (count of blockers not closed, i.e. neither done nor cancelled) and openBlockerKeys. " +
 				"Each ticket also shows links (compact: key and type; for duplicates direction \"out\" = this ticket duplicates the key, \"in\" = the key duplicates this ticket). " +
 				"Use compact=true to save tokens: no description, subtasks and questions only as counts (subtasksDone/subtasksTotal, questionsOpen/questionsTotal).",
@@ -835,12 +875,54 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"teamId":    {Type: "string", Description: "Filter by team ID"},
 					"status":    {Type: "string", Description: "Filter by status", Enum: models.TicketStatuses},
 					"priority":  {Type: "string", Description: "Filter by priority", Enum: []string{"urgent", "high", "medium", "low"}},
-					"label":     {Type: "string", Description: "Filter by tag name or ID"},
-					"search":    {Type: "string", Description: "Case-insensitive substring over key, title and description"},
+					"label":     {Type: "string", Description: "Filter by tag name or ID, e.g. W01:Lamps (use this, not search, for tags)"},
+					"search":    {Type: "string", Description: "Case-insensitive substring over key, title and description (not tags)"},
 					"field":     {Type: "string", Description: "Custom field filter: \"name=value\" (value compared case-insensitively) or \"name\" (field is present)"},
 					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all closed (done or cancelled), or that have none"},
 					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks and questions only as counts (default false)"},
+					"includeLive": {Type: "boolean", Description: "If true, also return live progress cards (kind=live, made by upsert_live_card); hidden by default"},
 				},
+			},
+		},
+		{
+			Name:        "tag_overview",
+			Description: "ONE tag (e.g. W01:Lamps): counts by status and one line per ticket (key, status, title cut to 100 chars). Done and cancelled tickets are left out of the lines unless includeClosed=true; counts always cover all. Small output: use this to see what is left in a cluster.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"label":         {Type: "string", Description: "Tag name, e.g. W01:Lamps"},
+					"includeClosed": {Type: "boolean", Description: "If true, also list done and cancelled tickets (default false)"},
+				},
+				Required: []string{"label"},
+			},
+		},
+		{
+			Name:        "tags_overview",
+			Description: "ALL tags starting with a prefix (e.g. W01:) in ONE call: the same as tag_overview for each tag. A ticket with several matching tags appears under each. Prefix is required; the whole board is never returned.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"prefix":        {Type: "string", Description: "Tag name prefix, e.g. W01:"},
+					"includeClosed": {Type: "boolean", Description: "If true, also list done and cancelled tickets (default false)"},
+				},
+				Required: []string{"prefix"},
+			},
+		},
+		{
+			Name:        "ticket_sections",
+			Description: "ONE section of many tickets, paged. section=task: text under the '# Задача' heading of the description; section=questions: question and answer list; section=fields: custom fields. Select tickets by label (tag) and optional status, or by keys. Tickets without that section are skipped. Long values are cut to maxChars (default 1500, see truncated). Default limit 20, max 100; total = tickets that have the section; use offset for the next page.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"section":  {Type: "string", Description: "What to return", Enum: []string{"task", "questions", "fields"}},
+					"label":    {Type: "string", Description: "Tag name, e.g. W01:Lamps (required unless keys is given)"},
+					"status":   {Type: "string", Description: "Filter by status (optional, with label)", Enum: models.TicketStatuses},
+					"keys":     {Type: "array", Description: "Ticket keys such as UE-846; used instead of label", Items: &jsonSchema{Type: "string"}},
+					"offset":   {Type: "integer", Description: "Skip this many tickets (paging, default 0)"},
+					"limit":    {Type: "integer", Description: "Tickets per page (default 20, max 100)"},
+					"maxChars": {Type: "integer", Description: "Cut each text value to this many characters (default 1500)"},
+				},
+				Required: []string{"section"},
 			},
 		},
 		{
@@ -1000,8 +1082,9 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 		// --- Board ---
 		{
 			Name: "get_board",
-			Description: "Get full Kanban board grouped by status columns (triage, backlog, todo, in_progress, ready_for_review, done, cancelled)." +
-				"Use compact=true to save tokens: no description, subtasks and questions only as counts (subtasksDone/subtasksTotal, questionsOpen/questionsTotal).",
+			Description: "WHOLE board in status columns, very large (hundreds of tickets, tens of thousands of characters even with compact=true). " +
+				"Use it only for the full picture. To see one tag (cluster, wave) call tag_overview; for several tags tags_overview; for one section of many tickets ticket_sections. " +
+				"Filter label here means a tag; search does NOT look at tags (it matches key, title and description only).",
 			InputSchema: jsonSchema{
 				Type: "object",
 				Properties: map[string]schemaProp{
@@ -1011,6 +1094,7 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 					"field":     {Type: "string", Description: "Custom field filter: \"name=value\" or \"name\" (optional)"},
 					"unblocked": {Type: "boolean", Description: "If true, only tickets whose blockers are all closed (done or cancelled) (default false)"},
 					"compact":   {Type: "boolean", Description: "If true, omit description and return subtasks and questions only as counts (default false)"},
+					"includeLive": {Type: "boolean", Description: "If true, also return live progress cards (kind=live); hidden by default"},
 				},
 			},
 		},
@@ -1109,6 +1193,39 @@ func (s *MCPServer) toolDefinitions() []toolDef {
 				Type:       "object",
 				Properties: map[string]schemaProp{"id": {Type: "string", Description: "Question ID"}},
 				Required:   []string{"id"},
+			},
+		},
+		// --- Live cards (progress of a running build or test, shown specially on the board) ---
+		{
+			Name: "upsert_live_card",
+			Description: "Create or update a live progress card on the board (a build, a test run): a short title, a progress bar, one status line and up to 4 body lines. " +
+				"The same liveId updates the same card instead of creating a second one; the card is created in in_progress, sorts to the top of its column and cannot be moved by hand. " +
+				"Live cards are hidden from list_tickets and get_board unless includeLive=true. Returns the ticket key.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"projectId":        {Type: "string", Description: "Project ID or prefix, e.g. UE"},
+					"liveId":           {Type: "string", Description: "Stable caller-chosen id of the card, e.g. r0_60; the same liveId updates the same card"},
+					"title":            {Type: "string", Description: "Short one-line title, e.g. \"Сборка R0\""},
+					"progress":         {Type: "integer", Description: "Progress 0..100"},
+					"progressText":     {Type: "string", Description: "One short line: what is happening now, e.g. \"сборка: 312 из 513 файлов\""},
+					"state":            {Type: "string", Description: "running (default, blue), ok (green) or failed (red)", Enum: models.LiveStates},
+					"lines":            {Type: "array", Description: "Up to 4 short lines shown as the card body", Items: &jsonSchema{Type: "string"}},
+					"expiresInSeconds": {Type: "integer", Description: "Delete the card this many seconds from now; omitted = keep the current expiry, 0 = never expire"},
+				},
+				Required: []string{"projectId", "liveId", "title", "progress"},
+			},
+		},
+		{
+			Name:        "remove_live_card",
+			Description: "Delete the live progress card with this liveId; returns {deleted: true|false}.",
+			InputSchema: jsonSchema{
+				Type: "object",
+				Properties: map[string]schemaProp{
+					"projectId": {Type: "string", Description: "Project ID or prefix"},
+					"liveId":    {Type: "string", Description: "liveId given to upsert_live_card"},
+				},
+				Required: []string{"projectId", "liveId"},
 			},
 		},
 	}

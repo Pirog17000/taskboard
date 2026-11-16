@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -23,7 +24,9 @@ var (
 const (
 	ticketColumns = `t.id, t.project_id, t.team_id, t.number, t.title, t.description,
 		t.status, t.priority, t.due_date, t.position, t.created_at, t.updated_at,
-		COALESCE(p.prefix, '') as project_prefix`
+		COALESCE(p.prefix, '') as project_prefix,
+		COALESCE(t.kind, ''), COALESCE(t.live_id, ''), COALESCE(t.progress, 0), COALESCE(t.progress_text, ''),
+		COALESCE(t.live_state, ''), COALESCE(t.live_lines, ''), t.expires_at`
 	ticketFrom = " FROM tickets t LEFT JOIN projects p ON t.project_id = p.id"
 
 	populateChunk = 500
@@ -38,10 +41,14 @@ func scanTickets(rows *sql.Rows) ([]models.Ticket, error) {
 	var tickets []models.Ticket
 	for rows.Next() {
 		var t models.Ticket
+		var lines string
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.TeamID, &t.Number, &t.Title, &t.Description,
 			&t.Status, &t.Priority, &t.DueDate, &t.Position, &t.CreatedAt, &t.UpdatedAt,
-			&t.ProjectPrefix); err != nil {
+			&t.ProjectPrefix, &t.Kind, &t.LiveID, &t.Progress, &t.ProgressText, &t.LiveState, &lines, &t.ExpiresAt); err != nil {
 			return nil, err
+		}
+		if lines != "" {
+			json.Unmarshal([]byte(lines), &t.LiveLines)
 		}
 		tickets = append(tickets, t)
 	}

@@ -260,7 +260,13 @@ func (s *Store) ListTickets(filter models.TicketFilter) ([]models.Ticket, error)
 			}
 		}
 	}
-	query += " ORDER BY t.position ASC, t.created_at DESC"
+	if !filter.IncludeLive {
+		query += " AND COALESCE(t.kind, '') <> 'live'"
+	} else if err := s.SweepExpiredLive(); err != nil {
+		return nil, err
+	}
+	// Live cards sort to the top of their column
+	query += " ORDER BY (COALESCE(t.kind, '') = 'live') DESC, t.position ASC, t.created_at DESC"
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -445,6 +451,11 @@ func (s *Store) UpdateTicket(id string, req models.UpdateTicketRequest) (*models
 func (s *Store) MoveTicket(id string, req models.MoveTicketRequest) (*models.Ticket, error) {
 	if !models.IsValidTicketStatus(req.Status) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidStatus, req.Status)
+	}
+	var kind string
+	s.db.QueryRow("SELECT COALESCE(kind, '') FROM tickets WHERE id = ?", id).Scan(&kind)
+	if kind == models.KindLive {
+		return nil, ErrLiveCard
 	}
 	now := time.Now()
 	position := float64(0)

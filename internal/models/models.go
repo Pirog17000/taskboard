@@ -79,6 +79,39 @@ type Ticket struct {
 	QuestionsOpen   int               `json:"questionsOpen,omitempty"`
 	QuestionsTotal  int               `json:"questionsTotal,omitempty"`
 	Links           []LinkRef         `json:"links,omitempty"`
+
+	// Live card fields (Kind == "live"); empty for normal tickets
+	Kind         string     `json:"kind,omitempty"`
+	LiveID       string     `json:"liveId,omitempty"`
+	Progress     int        `json:"progress,omitempty"`
+	ProgressText string     `json:"progressText,omitempty"`
+	LiveState    string     `json:"liveState,omitempty"`
+	LiveLines    []string   `json:"liveLines,omitempty"`
+	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
+}
+
+// KindLive marks a live progress card: created by scripts, shown specially, never moved or edited by hand.
+const KindLive = "live"
+
+// LiveStates — допустимые состояния живой карточки.
+var LiveStates = []string{"running", "ok", "failed"}
+
+// IsValidLiveState сообщает, является ли s допустимым состоянием живой карточки.
+func IsValidLiveState(s string) bool {
+	return slices.Contains(LiveStates, s)
+}
+
+// UpsertLiveRequest creates or updates the live card of (ProjectID, LiveID).
+// ExpiresInSeconds: nil keeps the current expiry, 0 clears it, N > 0 expires the card in N seconds.
+type UpsertLiveRequest struct {
+	ProjectID        string   `json:"projectId"`
+	LiveID           string   `json:"liveId"`
+	Title            string   `json:"title"`
+	Progress         int      `json:"progress"`
+	ProgressText     string   `json:"progressText,omitempty"`
+	State            string   `json:"state,omitempty"`
+	Lines            []string `json:"lines,omitempty"`
+	ExpiresInSeconds *int     `json:"expiresInSeconds,omitempty"`
 }
 
 // LinkRef is a link seen from one ticket: the other ticket's key and the link type.
@@ -246,6 +279,8 @@ type TicketFilter struct {
 	Field     string // "имя=значение" или "имя" (поле задано)
 	Unblocked bool   // только тикеты, у которых все блокирующие тикеты закрыты (done или cancelled)
 	Compact   bool   // без описания, подзадачи только счётчиками
+
+	IncludeLive bool // вместе с живыми карточками (по умолчанию они скрыты)
 }
 
 type AddDependencyRequest struct {
